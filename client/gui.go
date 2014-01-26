@@ -2095,7 +2095,7 @@ func (c *guiClient) showContact(id uint64) interface{} {
 		// Can we copy the font from left.rows[0][1].widget.widgetBase.font somehow?
 		widgetBase:     widgetBase{name: "name"}, 
 		text:           contact.name,
-		updateOnChange: true,
+		updateOnChange: false,
 	}
 	c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
 	c.gui.Actions() <- UIState{uiStateShowContact}
@@ -2105,11 +2105,17 @@ func (c *guiClient) showContact(id uint64) interface{} {
 
 	for {
 		event, wanted := c.nextEvent(0)
+		click, ok := event.(Click)
 		if wanted {
+			n := click.entries["name"]
+			if contact.name != n {
+				contact.name = n
+				c.save()
+				// c.gui.Actions() <- UIState{uiStateMain}
+				// c.gui.Signal()
+			}
 			return event
 		}
-
-		click, ok := event.(Click)
 		if !ok {
 			continue
 		}
@@ -2129,14 +2135,7 @@ func (c *guiClient) showContact(id uint64) interface{} {
 				c.gui.Actions() <- SetButtonText{name: "delete", text: "Confirm"}
 				c.gui.Signal()
 			}
-		}
-		
-		if click.name == "name" {
-			contact.name = click.entries["name"]
-			// c.gui.Actions() <- UIState{uiStateMain}
-			// c.gui.Signal()
-			// c.save()
-		}
+		}		
 	}
 
 	panic("unreachable")
