@@ -2108,12 +2108,20 @@ func (c *guiClient) showContact(id uint64) interface{} {
 		click, ok := event.(Click)
 		if wanted {
 			n := click.entries["name"]
-			if contact.name != n {
-				contact.name = n
-				c.save()
-				// c.gui.Actions() <- UIState{uiStateMain}
-				// c.gui.Signal()
+			if contact.name == n {
+				return event
 			}
+			for _, t := range c.contacts {
+				if t.name == n {
+					c.log.Printf("Another contact already has the name %s.\n", n)
+					return event
+				}
+			}
+			c.log.Printf("Contact %s renamed to %s.\n", contact.name, n)
+			contact.name = n
+			c.save()
+			// c.gui.Actions() <- UIState{uiStateMain}
+			// c.gui.Signal()
 			return event
 		}
 		if !ok {
