@@ -487,6 +487,9 @@ func (c *guiClient) mainUI() {
 													widgetBase: widgetBase{width: 100, name: "newcontact"},
 													text:       "Add",
 												},
+                        Button{
+                          text: "Invite",
+                        },
 											},
 										},
 									},
