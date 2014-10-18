@@ -488,6 +488,7 @@ func (c *guiClient) mainUI() {
 													text:       "Add",
 												},
                         Button{
+							widgetBase: widgetBase{width: 100, name: "invitecontact"},
                           text: "Invite",
                         },
 											},
@@ -666,6 +667,8 @@ func (c *guiClient) mainUI() {
 		switch click.name {
 		case "newcontact":
 			nextEvent = c.newContactUI(nil)
+		case "invitecontact":
+			nextEvent = c.newInviteUI(nil)
 		case "compose":
 			nextEvent = c.composeUI(nil, nil)
 		}
@@ -2158,6 +2161,10 @@ func (c *guiClient) showContact(id uint64) interface{} {
 	}
 
 	panic("unreachable")
+}
+
+func (c *guiClient) newInviteUI(contact *Contact) interface{} {
+	return nil
 }
 
 func (c *guiClient) newContactUI(contact *Contact) interface{} {
