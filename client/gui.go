@@ -2087,6 +2087,14 @@ func (c *guiClient) showContact(id uint64) interface{} {
 					text: "Delete",
 				}},
 			},
+			{
+				{1, 1, Button{
+					widgetBase: widgetBase{
+						name: "rename",
+					},
+					text: "Rename",
+				}},
+			},
 		},
 	}
 
