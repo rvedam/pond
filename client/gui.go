@@ -61,6 +61,7 @@ const (
 	uiStateMain
 	uiStateCreateAccount
 	uiStateCreatePassphrase
+	uiStateIntroduceContact
 	uiStateNewContact
 	uiStateNewContact2
 	uiStateShowContact
@@ -141,7 +142,7 @@ func (c *guiClient) nextEvent(currentMsgId uint64) (event interface{}, wanted bo
 		wanted = true
 	}
 	if click, ok := event.(Click); ok {
-		wanted = wanted || click.name == "newcontact" || click.name == "compose"
+		wanted = wanted || click.name == "newcontact" || click.name == "compose" || click.name == "introduce"
 	}
 	return
 }
@@ -488,6 +489,10 @@ func (c *guiClient) mainUI() {
 													widgetBase: widgetBase{width: 100, name: "newcontact"},
 													text:       "Add",
 												},
+												Button{
+													widgetBase: widgetBase{width: 100, name: "introduce"},
+													text:       "Introduce",
+												},
 											},
 										},
 									},
@@ -662,6 +667,8 @@ func (c *guiClient) mainUI() {
 		switch click.name {
 		case "newcontact":
 			nextEvent = c.newContactUI(nil)
+		case "introduce":
+			nextEvent = c.IntroduceUI(nil)
 		case "compose":
 			nextEvent = c.composeUI(nil, nil)
 		}
@@ -2262,6 +2269,65 @@ func (c *guiClient) showContact(id uint64) interface{} {
 		}
 	}
 
+	panic("unreachable")
+}
+
+func (c *guiClient) IntroduceUI(contact *Contact) interface{} {
+	//var first, second string
+	var firstDefaultLabel string //, secondDefaultLabel string
+
+	var contactLabels []string
+	for _, contact := range c.contacts {
+		contactLabels = append(contactLabels, contact.name)
+	}
+	firstDefaultLabel = contactLabels[0]
+
+	// TODO: figure out the logic for updating the second combobox based on the selection of the first
+	//secondDefaultLabel = contactLabels[0]
+
+	grid := Grid {
+		widgetBase: widgetBase{name: "grid", margin: 5},
+		rowSpacing: 8,
+		colSpacing: 3,
+		rows: [][]GridE{
+			{
+				{1, 1, Label{text: "Select the first contact."}},
+
+				{1, 1, RadioGroup{widgetBase: widgetBase{name: "numdecks"}, labels: []string{"1 deck", "2 decks"}}},
+
+				// TODO: change 'servercombo' to something more appropriate
+				{1, 1, Label{text: "Select the first contact."}},
+				{1, 1, Combo{
+					widgetBase:  widgetBase{name: "servercombo"},
+					labels:      contactLabels,
+					preSelected: firstDefaultLabel,
+					},
+				},
+			},
+			{
+				{1, 1, Label{text: "Select the second contact."}},
+				{1, 1, Combo{
+					widgetBase:  widgetBase{name: "servercombo"},
+					labels:      contactLabels,
+					preSelected: firstDefaultLabel,
+					},
+				},
+			},
+		},
+	}
+
+	//nextRow := len(grid.rows)
+
+	c.gui.Actions() <- SetChild{name: "right", child: rightPane("Introduce CONTACTS", nil, nil, grid)}
+	c.gui.Actions() <- UIState{uiStateIntroduceContact}
+	c.gui.Signal()
+
+ 	for {
+		event, wanted := c.nextEvent(0)
+		if wanted {
+			return event
+		}
+	}
 	panic("unreachable")
 }
 
