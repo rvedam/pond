@@ -2090,9 +2090,9 @@ func (c *guiClient) showContact(id uint64) interface{} {
 			{
 				{1, 1, Button{
 					widgetBase: widgetBase{
-						name: "rename",
+						name: "edit",
 					},
-					text: "Rename",
+					text: "Edit",
 				}},
 			},
 		},
