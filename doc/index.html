@@ -39,6 +39,7 @@ title: Pond
   <tr><td>Debian Wheezy</td><td><a href="binary/debian/pond.gpg">pond.gpg</a></td><td><tt>sudo apt-get install libtspi1 libgtkspell-3-0</tt></td></tr>
   <tr><td>Fedora 19</td><td><a href="binary/fedora/pond.gpg">pond.gpg</a></td><td><tt>sudo yum install trousers gtkspell3</tt></td></tr>
   <tr><td>OS X 10.9</td><td><a href="binary/osx/Pond.tar.gpg">Pond.tar.gpg</a></td><td>WARNING: no support for erasure storage yet</td></tr>
+  <tr><td>Tails 1.1</td><td><a href="binary/tails11/pond.gpg">pond.gpg</a></td><td>No TPM because it goes against the spirit of Tails. Will store state file in <tt>~/Persistent</tt> if found.</td></tr>
 </table>
 
 <h4>Building</h4>
@@ -47,7 +48,9 @@ title: Pond
 
 <h5>Ubuntu 13.10</h5>
 
-<pre>sudo apt-get install golang git libgtk-3-dev libgtkspell3-3-dev libtspi-dev trousers tor mercurial
+<p>First, <a href="https://golang.org/doc/install">install Go</a>. The packaged version of Go (usually called <tt>golang</tt>) is unlikely to work.</p>
+
+<pre>sudo apt-get install git libgtk-3-dev libgtkspell3-3-dev libtspi-dev trousers tor mercurial tpm-tools
 cd
 mkdir gopkg
 export GOPATH=$HOME/gopkg
@@ -58,20 +61,36 @@ $GOPATH/bin/client</pre>
 
 <p>Same as Ubuntu, above, but 1) on the <tt>go get</tt> command line add <tt>-tags ubuntu</tt> before the URL and 2) the gtkspell package is called <tt>libgtkspell-3-dev</tt>. On more recent versions of Debian, the instructions should be exactly the same as Ubuntu.</p>
 
-<p><i>WARNING</i>: Using <tt>golang</tt> version 1.0 (Wheezy package) is not recommended and compatibility is untested. If you face any problems compiling pond try to upgrade <tt>golang</tt> to version 1.2 from the testing repository.</p>
+<h5>Tails (Version 1.1.1)</h5>
 
-<h5>Tails</h5>
-<p>Tails only supports the CLI mode of operation for Pond as it is based on an old Debian-stable.
-Build, install and usage instructions for Tails users:</p>
-<pre>sudo apt-get update --fix-missing
-sudo apt-get install -t unstable golang
-sudo apt-get install mercurial trousers gcc
-sudo apt-get install -t backports libtspi-dev
-mkdir ~/Persistent/go/
-export GOPATH=$HOME/Persistent/go/
-export PATH=$PATH:$GOPATH/bin
-go get -tags nogui github.com/agl/pond/client
-alias pond-client="$GOPATH/bin/client --state-file=/home/amnesia/Persistent/.pond"</pre>
+<p>First, if you have not done so already, configure Tails persistence (<em>Applications</em> &rarr; <em>Tails</em> &rarr; <em>Configure persistent volume</em>) to persist "Personal Data", "APT Packages", "APT Lists", and "Dotfiles". A reboot is required after these settings are changed.</p>
+
+<p>Next, when starting Tails, click "Yes" at the "More options?" prompt to set an Administration password. You'll need this password to install Pond's dependencies.</p>
+
+<p>Next, open a Terminal and copy and paste the following commands to build and install Pond:</p>
+
+<pre>echo 'export GOPATH=$HOME/Persistent/go/' &gt;&gt; ~/.bashrc
+. ~/.bashrc
+mkdir $GOPATH
+alias pond-build='sudo bash -c "sudo apt-get update &amp;&amp; \
+apt-get install -y -t testing golang &amp;&amp; \
+apt-get install -y gcc git mercurial libgtk-3-dev libgtkspell-3-dev libtspi-dev trousers" &amp;&amp; \
+go get -u -tags ubuntu github.com/agl/pond/client &amp;&amp; \
+echo "Success." || echo "Sorry, something went wrong."'
+alias pond-install-deps='sudo apt-get install libtspi1 libgtkspell-3-0'
+alias pond='$GOPATH/bin/client'
+alias pond-cli='$GOPATH/bin/client --cli'
+alias|grep pond &gt;&gt; ~/.bashrc
+pond-build</pre>
+
+<p>Finally, run the following command (if you have not previously done so) to add your <tt>~/.bashrc</tt> to the persistent storage:</p>
+<pre>cp ~/.bashrc /live/persistence/TailsData_unlocked/dotfiles/.bashrc</pre>
+
+<p>Each time you start Tails in the future, before you can run Pond, you'll just need to reinstall its runtime dependencies using the <tt>pond-install-deps</tt> command.</p>
+
+<p>At this point, you should be able to run Pond's graphical interface with the <tt>pond</tt> command, or run its command-line interface with the <tt>pond-cli</tt> command.</p>
+
+<p>From time to time you can re-run the <tt>pond-build</tt> command to update to the latest version.</p>
 
 <h5>Fedora 19</h5>
 
@@ -142,6 +161,16 @@ go get github.com/agl/pond/client
 
 <p>However, unless you are already familiar with GTK development on OS X, I'd suggest using a Linux machine at this point. Since OS X development doesn't occur on my main development machine, I have to move patches across which also means that github doesn't always have the most up-to-date OS X changes.</p>
 
+<p>If you just want the CLI version of Pond, you can use the nogui tag like so:</p>
+
+<pre>
+brew install go
+export GOPATH=$HOME/gopkg
+export PATH=$PATH:$GOPATH/bin
+go get -tags nogui github.com/agl/pond/client
+alias pond="$GOPATH/bin/client"
+</pre>
+
 <p><i>WARNING</i>: there are no TPM chips in Macs and, since they generally use SSDs, which are log structured internally, messages cannot be safely erased. There is a firmware NVRAM on Macs that could be used for erasure storage, but I haven't written support for that yet.</p>
 
 <h4>Running a Pond server</h4>
@@ -177,8 +206,7 @@ export PATH=$PATH:$GOPATH/bin</pre>
 <p>Make a <tt>torrc</tt> for your hidden service, as in this snippet:</p>
 
 <pre>HiddenServiceDir /var/lib/tor/pond_server/
-HiddenServicePort 16333 127.0.0.1:16333
-ORPort 9001</pre>
+HiddenServicePort 16333 127.0.0.1:16333</pre>
 
 Restart tor and then get your .onion addr:
 

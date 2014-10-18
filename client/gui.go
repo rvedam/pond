@@ -356,7 +356,7 @@ func (c *guiClient) processFetch(inboxMsg *InboxMessage) {
 
 func (c *guiClient) processServerAnnounce(inboxMsg *InboxMessage) {
 	subline := time.Unix(*inboxMsg.message.Time, 0).Format(shortTimeFormat)
-	c.inboxUI.Add(inboxMsg.id, "Home Server", subline, indicatorBlue)
+	c.inboxUI.Add(inboxMsg.id, c.ContactName(inboxMsg.from), subline, indicatorBlue)
 	c.updateWindowTitle()
 }
 
@@ -555,14 +555,12 @@ func (c *guiClient) mainUI() {
 			}
 			subline = time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
 		}
-		fromString := "Home Server"
 		if msg.from != 0 {
-			fromString = c.contacts[msg.from].name
 			if i == indicatorNone && !msg.acked {
 				i = indicatorYellow
 			}
 		}
-		c.inboxUI.Add(msg.id, fromString, subline, i)
+		c.inboxUI.Add(msg.id, c.ContactName(msg.from), subline, i)
 		c.updateInboxBackgroundColor(msg)
 	}
 	c.updateWindowTitle()
@@ -580,7 +578,7 @@ func (c *guiClient) mainUI() {
 		}
 		if len(msg.message.Body) > 0 {
 			subline := msg.created.Format(shortTimeFormat)
-			c.outboxUI.Add(msg.id, c.contacts[msg.to].name, subline, msg.indicator(c.contacts[msg.to]))
+			c.outboxUI.Add(msg.id, c.ContactName(msg.to), subline, msg.indicator(c.contacts[msg.to]))
 		}
 	}
 
@@ -592,7 +590,7 @@ func (c *guiClient) mainUI() {
 	for _, draft := range c.drafts {
 		to := "Unknown"
 		if draft.to != 0 {
-			to = c.contacts[draft.to].name
+			to = c.ContactName(draft.to)
 		}
 		subline := draft.created.Format(shortTimeFormat)
 		c.draftsUI.Add(draft.id, to, subline, indicatorNone)
@@ -896,6 +894,12 @@ func (c *guiClient) createAccountUI(stateFile *disk.StateFile, pw string) (didIm
 		defaultServer = msgDefaultDevServer
 	}
 
+	serverLabels := []string{"Default"}
+	for _, server := range knownServers {
+		serverLabels = append(serverLabels, server.description)
+	}
+	serverLabels = append(serverLabels, "Custom")
+
 	ui := Grid{
 		widgetBase: widgetBase{margin: 20},
 		rowSpacing: 5,
@@ -918,13 +922,14 @@ func (c *guiClient) createAccountUI(stateFile *disk.StateFile, pw string) (didIm
 				}},
 			},
 			{
-				{1, 1, Label{
-					text:   "Server:",
-					yAlign: 0.5,
+				{1, 1, Combo{
+					widgetBase:  widgetBase{name: "servercombo"},
+					labels:      serverLabels,
+					preSelected: "Default",
 				}},
 				{1, 1, Entry{
-					widgetBase: widgetBase{name: "server", hAlign: AlignStart, hExpand: true, margin: 10},
-					width:      75,
+					widgetBase: widgetBase{name: "server", hAlign: AlignStart, hExpand: true, margin: 10, insensitive: true},
+					width:      60,
 					text:       defaultServer,
 				}},
 			},
@@ -1037,6 +1042,27 @@ func (c *guiClient) createAccountUI(stateFile *disk.StateFile, pw string) (didIm
 
 			c.lastErasureStorageTime = time.Now()
 			return true, nil
+		case "servercombo":
+			selected := click.combos["servercombo"]
+			server := ""
+
+			switch selected {
+			case "Default":
+				server = defaultServer
+			case "Custom":
+				server = ""
+			default:
+				for _, known := range knownServers {
+					if known.description == selected {
+						server = known.uri
+					}
+				}
+			}
+
+			c.gui.Actions() <- Sensitive{name: "server", sensitive: len(server) == 0}
+			c.gui.Actions() <- SetEntry{name: "server", text: server}
+			c.gui.Signal()
+			continue
 		case "create":
 			break
 		default:
@@ -1192,15 +1218,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 		c.save()
 	}
 
-	fromString, sentTimeText, eraseTimeText, msgText := msg.Strings()
-
-	var contact *Contact
-	if !isServerAnnounce {
-		contact = c.contacts[msg.from]
-	}
-	if len(fromString) == 0 && contact != nil {
-		fromString = contact.name
-	}
+	sentTimeText, eraseTimeText, msgText := msg.Strings()
 
 	left := Grid{
 		widgetBase: widgetBase{margin: 6, name: "lhs"},
@@ -1215,7 +1233,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 				// We set hExpand true here so that the
 				// attachments/detachments UI doesn't cause the
 				// first column to expand.
-				{1, 1, Label{widgetBase: widgetBase{hExpand: true}, text: fromString}},
+				{1, 1, Label{widgetBase: widgetBase{hExpand: true}, text: c.ContactName(msg.from)}},
 			},
 			{
 				{1, 1, Label{
@@ -1749,7 +1767,7 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 			c.outboxUI.Remove(msg.id)
 
 			draft := c.outboxToDraft(msg)
-			c.draftsUI.Add(draft.id, c.contacts[msg.to].name, draft.created.Format(shortTimeFormat), indicatorNone)
+			c.draftsUI.Add(draft.id, c.ContactName(msg.to), draft.created.Format(shortTimeFormat), indicatorNone)
 			c.draftsUI.Select(draft.id)
 			c.drafts[draft.id] = draft
 			c.save()
@@ -1920,7 +1938,7 @@ func (c *guiClient) identityUI() interface{} {
 									name:        "entomb",
 									insensitive: true,
 								},
-								text: "Emtomb",
+								text: "Entomb",
 							}},
 							{1, 1, Label{
 								widgetBase: widgetBase{hExpand: true},
@@ -2501,7 +2519,7 @@ func (c *guiClient) newContactPanda(contact *Contact, existing bool, nextRow int
 					colSpacing: 5,
 					rows: [][]GridE{
 						{
-							{1, 1, Entry{widgetBase: widgetBase{name: "shared", width: 400}}},
+							{1, 1, Entry{widgetBase: widgetBase{name: "shared", width: 400}, updateOnChange: true}},
 							{1, 1, Button{widgetBase: widgetBase{name: "generate"}, text: "Generate"}},
 						},
 					},
@@ -2613,6 +2631,12 @@ SharedSecretEvent:
 			return event
 		}
 
+		if update, ok := event.(Update); ok && update.name == "shared" {
+			ok := panda.IsAcceptableSecretString(update.text)
+			c.gui.Actions() <- Sensitive{name: "begin", sensitive: ok}
+			c.gui.Signal()
+		}
+
 		if update, ok := event.(Update); ok && update.name == "cardentry" && len(update.text) >= 2 {
 			cardText := update.text[:2]
 			if cardText == "10" {
@@ -2716,9 +2740,7 @@ SharedSecretEvent:
 				contact.kxsBytes = nil
 				break SharedSecretEvent
 			case click.name == "generate":
-				var secret [16]byte
-				c.randBytes(secret[:])
-				c.gui.Actions() <- SetEntry{name: "shared", text: fmt.Sprintf("%x", secret[:])}
+				c.gui.Actions() <- SetEntry{name: "shared", text: panda.NewSecretString(c.rand)}
 				c.gui.Signal()
 			}
 		}
@@ -2938,10 +2960,8 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 		}
 
 		draft = &Draft{
-			id:        c.randId(),
-			inReplyTo: 0,
-			to:        0,
-			created:   c.Now(),
+			id:      c.randId(),
+			created: c.Now(),
 		}
 		if inReplyTo != nil {
 			draft.inReplyTo = inReplyTo.id

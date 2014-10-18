@@ -59,6 +59,7 @@ package main
 // the tests can fully synchonise and avoid non-determinism.
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/rand"
 	"encoding/binary"
@@ -69,6 +70,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -382,12 +384,7 @@ type InboxMessage struct {
 	decryptions map[uint64]*pendingDecryption
 }
 
-func (msg *InboxMessage) Strings() (from, sentTime, eraseTime, body string) {
-	isServerAnnounce := msg.from == 0
-
-	if isServerAnnounce {
-		from = "<Home Server>"
-	}
+func (msg *InboxMessage) Strings() (sentTime, eraseTime, body string) {
 	isPending := msg.message == nil
 	if isPending {
 		body = "(cannot display message as key exchange is still pending)"
@@ -528,7 +525,29 @@ type Draft struct {
 	// saved to disk.
 	cliId cliId
 
+	// pendingDetachments is only used by the GTK UI.
 	pendingDetachments map[uint64]*pendingDetachment
+}
+
+// prettyNumber formats n in base 10 and puts commas between groups of
+// thousands.
+func prettyNumber(n uint64) string {
+	s := strconv.FormatUint(n, 10)
+	ret := make([]rune, 0, len(s)*2)
+
+	phase := len(s) % 3
+	for i, r := range s {
+		if phase == 0 && i > 0 {
+			ret = append(ret, ',')
+		}
+		ret = append(ret, r)
+		phase--
+		if phase < 0 {
+			phase += 3
+		}
+	}
+
+	return string(ret)
 }
 
 // usageString returns a description of the amount of space taken up by a body
@@ -557,7 +576,7 @@ func (draft *Draft) usageString() (string, bool) {
 		panic("error while serialising candidate Message: " + err.Error())
 	}
 
-	s := fmt.Sprintf("%d of %d bytes", len(serialized), pond.MaxSerializedMessage)
+	s := fmt.Sprintf("%s of %s bytes", prettyNumber(uint64(len(serialized))), prettyNumber(pond.MaxSerializedMessage))
 	return s, len(serialized) > pond.MaxSerializedMessage
 }
 
@@ -628,6 +647,13 @@ func (c *client) outboxToDraft(msg *queuedMessage) *Draft {
 	return draft
 }
 
+func (c *client) ContactName(id uint64) string {
+	if id == 0 {
+		return "Home Server"
+	}
+	return c.contacts[id].name
+}
+
 // detectTor sets c.torAddress, either from the POND_TOR_ADDRESS environment
 // variable if it is set or by attempting to connect to port 9050 and 9150 on
 // the local host and assuming that Tor is running on the first port that it
@@ -656,6 +682,15 @@ func (c *client) detectTor() bool {
 	}
 
 	return false
+}
+
+var knownServers = []struct {
+	nickname    string
+	description string
+	uri         string
+}{
+	{"wau", "Wau Holland Foundation", "pondserver://25WHHEVD3565FGIOXJZWV7LGQFR4BTO3HF3FWHEW7PCYPFMFPVOQ@vx652n4utsodj5c6.onion"},
+	{"hoi", "Hoi Polloi (https://hoi-polloi.org)", "pondserver://4V6Q5M2AFLBW6UIYL2B5LMKDHEBA6HRHR6UIUU3VDQFNI3BHZAEQ@oum7argqrnlzpcro.onion"},
 }
 
 func (c *client) enqueue(m *queuedMessage) {
@@ -824,6 +859,8 @@ func (contact *Contact) subline() string {
 		return "pending"
 	case len(contact.pandaResult) > 0:
 		return "failed"
+	case !contact.isPending && contact.ratchet == nil:
+		return "old ratchet"
 	}
 	return ""
 }
@@ -1072,6 +1109,28 @@ func (c *client) removeQueuedMessage(index int) {
 	c.queue = newQueue
 }
 
+func (c *client) moveContactsMessagesToEndOfQueue(id uint64) {
+	// c.queueMutex must be held before calling this function.
+
+	if len(c.queue) < 2 {
+		// There are no other orders for queues of length zero or one.
+		return
+	}
+
+	newQueue := make([]*queuedMessage, 0, len(c.queue))
+	movedMessages := make([]*queuedMessage, 0, 2)
+
+	for _, queuedMsg := range c.queue {
+		if queuedMsg.to == id {
+			movedMessages = append(movedMessages, queuedMsg)
+		} else {
+			newQueue = append(movedMessages, queuedMsg)
+		}
+	}
+	newQueue = append(newQueue, movedMessages...)
+	c.queue = newQueue
+}
+
 func (c *client) deleteContact(contact *Contact) {
 	var newInbox []*InboxMessage
 	for _, msg := range c.inbox {
@@ -1119,6 +1178,36 @@ func (c *client) deleteContact(contact *Contact) {
 
 	c.ui.removeContactUI(contact)
 	delete(c.contacts, contact.id)
+}
+
+// indentForReply returns a copy of in where the beginning of each line is
+// prefixed with "> ", as is typical for replies.
+func indentForReply(i []byte) string {
+	in := bufio.NewReader(bytes.NewBuffer(i))
+	var out bytes.Buffer
+
+	newLine := true
+	for {
+		line, isPrefix, err := in.ReadLine()
+		if err != nil {
+			break
+		}
+
+		if newLine {
+			if len(line) > 0 {
+				out.WriteString("> ")
+			} else {
+				out.WriteString(">")
+			}
+		}
+		out.Write(line)
+		newLine = !isPrefix
+		if !isPrefix {
+			out.WriteString("\n")
+		}
+	}
+
+	return string(out.Bytes())
 }
 
 // RunPANDA runs in its own goroutine and runs a PANDA key exchange.
@@ -1177,7 +1266,6 @@ func (c *client) processPANDAUpdate(update pandaUpdate) {
 	case update.result != nil:
 		contact.pandaKeyExchange = nil
 		contact.pandaShutdownChan = nil
-		contact.isPending = false
 
 		if err := contact.processKeyExchange(update.result, c.dev, c.simulateOldClient, c.disableV2Ratchet); err != nil {
 			contact.pandaResult = err.Error()
@@ -1185,6 +1273,7 @@ func (c *client) processPANDAUpdate(update pandaUpdate) {
 			c.log.Printf("Key exchange with %s failed: %s", contact.name, err)
 		} else {
 			c.log.Printf("Key exchange with %s complete", contact.name)
+			contact.isPending = false
 		}
 	}
 

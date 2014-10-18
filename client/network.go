@@ -224,10 +224,10 @@ func (c *client) processSigningRequest(sigReq signingRequest) {
 
 	request := &pond.Request{
 		Deliver: &pond.Delivery{
-			To:         to.theirIdentityPublic[:],
-			Signature:  groupSig,
-			Generation: proto.Uint32(to.generation),
-			Message:    sealed,
+			To:             to.theirIdentityPublic[:],
+			GroupSignature: groupSig,
+			Generation:     proto.Uint32(to.generation),
+			Message:        sealed,
 		},
 	}
 
@@ -301,29 +301,29 @@ func (c *client) revoke(to *Contact) *queuedMessage {
 	return out
 }
 
-func decryptMessage(sealed []byte, from *Contact) ([]byte, bool) {
+func decryptMessage(sealed []byte, from *Contact) ([]byte, error) {
 	if from.ratchet != nil {
 		plaintext, err := from.ratchet.Decrypt(sealed)
 		if err != nil {
-			return nil, false
+			return nil, err
 		}
-		return plaintext, true
+		return plaintext, nil
 	}
 
 	var nonce [24]byte
 	if len(sealed) < len(nonce) {
-		return nil, false
+		return nil, errors.New("message shorter than nonce")
 	}
 	copy(nonce[:], sealed)
 	sealed = sealed[24:]
 	headerLen := ephemeralBlockLen - len(nonce)
 	if len(sealed) < headerLen {
-		return nil, false
+		return nil, errors.New("message shorter than header")
 	}
 
 	publicBytes, ok := decryptMessageInner(sealed[:headerLen], &nonce, from)
 	if !ok || len(publicBytes) != 32 {
-		return nil, false
+		return nil, errors.New("failed to decrypt inner message")
 	}
 	var innerNonce [nonceLen]byte
 	sealed = sealed[headerLen:]
@@ -333,12 +333,12 @@ func decryptMessage(sealed []byte, from *Contact) ([]byte, bool) {
 	copy(ephemeralPublicKey[:], publicBytes)
 
 	if plaintext, ok := box.Open(nil, sealed, &innerNonce, &ephemeralPublicKey, &from.lastDHPrivate); ok {
-		return plaintext, ok
+		return plaintext, nil
 	}
 
 	plaintext, ok := box.Open(nil, sealed, &innerNonce, &ephemeralPublicKey, &from.currentDHPrivate)
 	if !ok {
-		return nil, false
+		return nil, errors.New("failed to decrypt with either DH values (old ratchet)")
 	}
 
 	// They have clearly received our current DH value. Time to
@@ -347,7 +347,7 @@ func decryptMessage(sealed []byte, from *Contact) ([]byte, bool) {
 	if _, err := io.ReadFull(rand.Reader, from.currentDHPrivate[:]); err != nil {
 		panic(err)
 	}
-	return plaintext, true
+	return plaintext, nil
 }
 
 func decryptMessageInner(sealed []byte, nonce *[24]byte, from *Contact) ([]byte, bool) {
@@ -395,14 +395,14 @@ func (c *client) processFetch(m NewMessage) {
 
 	var tag []byte
 	var ok bool
-	if c.groupPriv.Verify(digest, sha, f.Signature) {
-		tag, ok = c.groupPriv.Open(f.Signature)
+	if c.groupPriv.Verify(digest, sha, f.GroupSignature) {
+		tag, ok = c.groupPriv.Open(f.GroupSignature)
 	} else {
 		found := false
 		for _, prev := range c.prevGroupPrivs {
-			if prev.priv.Verify(digest, sha, f.Signature) {
+			if prev.priv.Verify(digest, sha, f.GroupSignature) {
 				found = true
-				tag, ok = c.groupPriv.Open(f.Signature)
+				tag, ok = c.groupPriv.Open(f.GroupSignature)
 				break
 			}
 		}
@@ -486,10 +486,10 @@ func (c *client) unsealMessage(inboxMsg *InboxMessage, from *Contact) bool {
 	}
 
 	sealed := inboxMsg.sealed
-	plaintext, ok := decryptMessage(sealed, from)
+	plaintext, err := decryptMessage(sealed, from)
 
-	if !ok {
-		c.logEvent(from, "Failed to decrypt message")
+	if err != nil {
+		c.logEvent(from, "Failed to decrypt message: "+err.Error())
 		return false
 	}
 
@@ -903,10 +903,6 @@ func (c *client) transact() {
 		} else {
 			head = c.queue[0]
 			head.sending = true
-			// Move the head of the queue to the end so that we
-			// don't get stuck trying send the same message over
-			// and over.
-			c.queue = append(c.queue[1:], head)
 			req = head.request
 			server = head.server
 			c.log.Printf("Starting message transmission to %s", server)
@@ -952,8 +948,8 @@ func (c *client) transact() {
 		if !isFetch {
 			c.queueMutex.Lock()
 			// Find the index of the message that we just sent (if any) in
-			// the queue. It should be at the end, but another message may
-			// have been enqueued while we were sending it.
+			// the queue. It should be at the front, but something
+			// may have happened while we didn't hold the lock.
 			indexOfSentMessage := c.indexOfQueuedMessage(head)
 
 			// If we sent a message that was removed from the queue while
@@ -968,12 +964,20 @@ func (c *client) transact() {
 				c.removeQueuedMessage(indexOfSentMessage)
 				c.queueMutex.Unlock()
 				c.messageSentChan <- messageSendResult{id: head.id}
-			} else if *reply.Status == pond.Reply_GENERATION_REVOKED &&
-				reply.Revocation != nil {
-				c.queueMutex.Unlock()
-				c.messageSentChan <- messageSendResult{id: head.id, revocation: reply.Revocation, extraRevocations: reply.ExtraRevocations}
 			} else {
+				// If the send failed for any reason then we
+				// want to move the message to the end of the
+				// queue so that we never clog the queue with
+				// an unsendable message. However, we also
+				// don't want to reorder messages so all
+				// messages to the same contact are moved to
+				// the end of the queue.
+				c.moveContactsMessagesToEndOfQueue(head.to)
 				c.queueMutex.Unlock()
+
+				if *reply.Status == pond.Reply_GENERATION_REVOKED && reply.Revocation != nil {
+					c.messageSentChan <- messageSendResult{id: head.id, revocation: reply.Revocation, extraRevocations: reply.ExtraRevocations}
+				}
 			}
 
 			head = nil
