@@ -488,8 +488,8 @@ func (c *guiClient) mainUI() {
 													text:       "Add",
 												},
 												Button{
-							widgetBase: widgetBase{width: 100, name: "invitecontact"},
-													text: "Invite",
+													widgetBase: widgetBase{width: 100, name: "invitecontact"},
+													text:       "Invite",
 												},
 											},
 										},
