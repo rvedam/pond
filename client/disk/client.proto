@@ -64,9 +64,16 @@ message Contact {
 	}
 	repeated PreviousTag previous_tags = 17;
 
+	enum EventType {
+		UNSPECIFIED = 0;
+		CAVEOT = 1;
+		REDCAVEOT = 2;
+		UNCAVEOT = 3;
+	}
 	message Event {
 		required int64 time = 1;
 		required string message = 2;
+		optional int64 type = 3;
 	}
 	repeated Event events = 22;
 
