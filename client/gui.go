@@ -2174,17 +2174,26 @@ func (c *guiClient) newInviteUI(contact *Contact) interface{} {
 	}
 	firstDefaultLabel = contactLabels[0]
 
+	// TODO: figure out the logic for updating the second combobox based on the selection of the first
+	//secondDefaultLabel = contactLabels[0]
+
 	grid := Grid {
 		widgetBase: widgetBase{name: "grid", margin: 5},
 		rowSpacing: 8,
 		colSpacing: 3,
 		rows: [][]GridE{
 			{
-				{1, 1, Label{text: "1."}},
+				// TODO: change 'servercombo' to something more appropriate
 				{1, 1, Label{text: "Select the first contact."}},
+				{1, 1, Combo{
+					widgetBase:  widgetBase{name: "servercombo"},
+					labels:      contactLabels,
+					preSelected: firstDefaultLabel,
+					},
+				},
 			},
 			{
-				{1, 1, nil},
+				{1, 1, Label{text: "Select the second contact."}},
 				{1, 1, Combo{
 					widgetBase:  widgetBase{name: "servercombo"},
 					labels:      contactLabels,
