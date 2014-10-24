@@ -2164,7 +2164,36 @@ func (c *guiClient) showContact(id uint64) interface{} {
 }
 
 func (c *guiClient) newInviteUI(contact *Contact) interface{} {
-	return nil
+	var first, second string
+	var firstDefaultLabel, secondDefaultLabel string
+
+	var contactLabels []string
+	for _, contact := range c.contacts {
+		contactLabels = append(contactLabels, contact.name)
+	}
+	firstDefaultLabel = contactLabels[0]
+
+	grid := Grid {
+		widgetBase: widgetBase{name: "grid", margin: 5},
+		rowSpacing: 8,
+		colSpacing: 3,
+		rows: [][]GridE{
+			{
+				{1, 1, Label{text: "1."}},
+				{1, 1, Label{text: "Select the first contact."}},
+			},
+			{
+				{1, 1, nil},
+				{1, 1, Combo{
+					widgetBase:  widgetBase{name: "servercombo"},
+					labels:      contactLabels,
+					preSelected: firstDefaultLabel,
+					},
+				},
+			},
+		},
+	}
+	return nil;
 }
 
 func (c *guiClient) newContactUI(contact *Contact) interface{} {
