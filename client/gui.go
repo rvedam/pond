@@ -61,6 +61,7 @@ const (
 	uiStateMain
 	uiStateCreateAccount
 	uiStateCreatePassphrase
+	uiStateInviteContact
 	uiStateNewContact
 	uiStateNewContact2
 	uiStateShowContact
@@ -2164,8 +2165,8 @@ func (c *guiClient) showContact(id uint64) interface{} {
 }
 
 func (c *guiClient) newInviteUI(contact *Contact) interface{} {
-	var first, second string
-	var firstDefaultLabel, secondDefaultLabel string
+	//var first, second string
+	var firstDefaultLabel string //, secondDefaultLabel string
 
 	var contactLabels []string
 	for _, contact := range c.contacts {
@@ -2193,6 +2194,13 @@ func (c *guiClient) newInviteUI(contact *Contact) interface{} {
 			},
 		},
 	}
+
+	//nextRow := len(grid.rows)
+
+	c.gui.Actions() <- SetChild{name: "right", child: rightPane("INVITE THE CONTACTS", nil, nil, grid)}
+	c.gui.Actions() <- UIState{uiStateInviteContact}
+	c.gui.Signal()
+
 	return nil;
 }
 
