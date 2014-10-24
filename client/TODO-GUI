@@ -1,0 +1,8 @@
+GUI
+
+- notes: notes about a contact, text that gets stored in the state file
+- suggest: suggest contact
+  - create new page
+  - two drop downs, and a text field + generate button (existing code)
+  - send a message to each recipient with the secret shared key
+  - also send the user's public id via message (to help verify)
