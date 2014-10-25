@@ -73,6 +73,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"net/url"
 
 	"code.google.com/p/go.crypto/curve25519"
 	"code.google.com/p/go.crypto/nacl/secretbox"
@@ -1287,6 +1288,41 @@ type pandaUpdate struct {
 	err        error
 	result     []byte
 	serialised []byte
+}
+
+func (c *client) suggestURLpair(id1,id2 uint64) (string,string) {
+	panda_secret := panda.NewSecretString(c.rand)[2:]
+	s := func(id uint64) (string) {
+		cnt := c.contacts[id]
+		return fmt.Sprintf("pond-add-panda:/%s/%s/%s/%s/\n",panda_secret,
+			cnt.theirPub,cnt.theirIdentityPublic,url.QueryEscape(cnt.name))
+	}
+	return s(id1), s(id2)
+}
+
+func (c *client) suggestURLs_onemany(ids []uint64) ([]string) {
+	var urls []string = make([]string,len(ids))
+	id1 := ids[0]
+	for i, id2 := range ids {
+		if i==0 { continue }
+		u1,u2 := c.suggestURLpair(id1,id2)
+		urls[0] += u1 
+		urls[i] = u2
+	}
+	return urls
+}
+
+func (c *client) suggestURLs_group(ids []uint64) ([]string) { 
+	n := len(ids)
+	var urls []string = make([]string,len(ids))
+	for i := 0; i < n; i++ {
+		for j := i+1; i < n; i++ {
+			ui,uj := c.suggestURLpair(ids[i],ids[j])
+			urls[i] += ui 
+			urls[j] += uj 
+		}
+	}	
+	return urls
 }
 
 func openAttachment(path string) (contents []byte, size int64, err error) {
