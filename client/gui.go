@@ -61,7 +61,7 @@ const (
 	uiStateMain
 	uiStateCreateAccount
 	uiStateCreatePassphrase
-	uiStateInviteContact
+	uiStateSuggestContact
 	uiStateNewContact
 	uiStateNewContact2
 	uiStateShowContact
@@ -141,7 +141,7 @@ func (c *guiClient) nextEvent(currentMsgId uint64) (event interface{}, wanted bo
 		wanted = true
 	}
 	if click, ok := event.(Click); ok {
-		wanted = wanted || click.name == "newcontact" || click.name == "compose"
+		wanted = wanted || click.name == "newcontact" || click.name == "compose" || click.name == "suggestcontact"
 	}
 	return
 }
@@ -497,8 +497,8 @@ func (c *guiClient) mainUI() {
 													text:       "Add",
 												},
 												Button{
-													widgetBase: widgetBase{width: 100, name: "invitecontact"},
-													text:       "Invite",
+													widgetBase: widgetBase{width: 100, name: "suggestcontact"},
+													text:       "Suggest",
 												},
 											},
 										},
@@ -674,8 +674,8 @@ func (c *guiClient) mainUI() {
 		switch click.name {
 		case "newcontact":
 			nextEvent = c.newContactUI(nil)
-		case "invitecontact":
-			nextEvent = c.newInviteUI(nil)
+		case "suggestcontact":
+			nextEvent = c.newSuggestUI(nil)
 		case "compose":
 			nextEvent = c.composeUI(nil, nil)
 		}
@@ -2238,7 +2238,7 @@ func (c *guiClient) showContact(id uint64) interface{} {
 	panic("unreachable")
 }
 
-func (c *guiClient) newInviteUI(contact *Contact) interface{} {
+func (c *guiClient) newSuggestUI(contact *Contact) interface{} {
 	//var first, second string
 	var firstDefaultLabel string //, secondDefaultLabel string
 
@@ -2281,10 +2281,16 @@ func (c *guiClient) newInviteUI(contact *Contact) interface{} {
 	//nextRow := len(grid.rows)
 
 	c.gui.Actions() <- SetChild{name: "right", child: rightPane("INVITE THE CONTACTS", nil, nil, grid)}
-	c.gui.Actions() <- UIState{uiStateInviteContact}
+	c.gui.Actions() <- UIState{uiStateSuggestContact}
 	c.gui.Signal()
 
-	return nil;
+  for {
+		event, wanted := c.nextEvent(0)
+		if wanted {
+			return event
+		}
+  }
+	panic("unreachable")
 }
 
 func (c *guiClient) newContactUI(contact *Contact) interface{} {
