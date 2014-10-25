@@ -357,7 +357,7 @@ func (c *guiClient) processFetch(inboxMsg *InboxMessage) {
 
 func (c *guiClient) processServerAnnounce(inboxMsg *InboxMessage) {
 	subline := time.Unix(*inboxMsg.message.Time, 0).Format(shortTimeFormat)
-	c.inboxUI.Add(inboxMsg.id, "Home Server", subline, indicatorBlue)
+	c.inboxUI.Add(inboxMsg.id, c.ContactName(inboxMsg.from), subline, indicatorBlue)
 	c.updateWindowTitle()
 }
 
@@ -560,14 +560,12 @@ func (c *guiClient) mainUI() {
 			}
 			subline = time.Unix(*msg.message.Time, 0).Format(shortTimeFormat)
 		}
-		fromString := "Home Server"
 		if msg.from != 0 {
-			fromString = c.contacts[msg.from].name
 			if i == indicatorNone && !msg.acked {
 				i = indicatorYellow
 			}
 		}
-		c.inboxUI.Add(msg.id, fromString, subline, i)
+		c.inboxUI.Add(msg.id, c.ContactName(msg.from), subline, i)
 		c.updateInboxBackgroundColor(msg)
 	}
 	c.updateWindowTitle()
@@ -585,7 +583,7 @@ func (c *guiClient) mainUI() {
 		}
 		if len(msg.message.Body) > 0 {
 			subline := msg.created.Format(shortTimeFormat)
-			c.outboxUI.Add(msg.id, c.contacts[msg.to].name, subline, msg.indicator(c.contacts[msg.to]))
+			c.outboxUI.Add(msg.id, c.ContactName(msg.to), subline, msg.indicator(c.contacts[msg.to]))
 		}
 	}
 
@@ -597,7 +595,7 @@ func (c *guiClient) mainUI() {
 	for _, draft := range c.drafts {
 		to := "Unknown"
 		if draft.to != 0 {
-			to = c.contacts[draft.to].name
+			to = c.ContactName(draft.to)
 		}
 		subline := draft.created.Format(shortTimeFormat)
 		c.draftsUI.Add(draft.id, to, subline, indicatorNone)
@@ -1227,15 +1225,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 		c.save()
 	}
 
-	fromString, sentTimeText, eraseTimeText, msgText := msg.Strings()
-
-	var contact *Contact
-	if !isServerAnnounce {
-		contact = c.contacts[msg.from]
-	}
-	if len(fromString) == 0 && contact != nil {
-		fromString = contact.name
-	}
+	sentTimeText, eraseTimeText, msgText := msg.Strings()
 
 	left := Grid{
 		widgetBase: widgetBase{margin: 6, name: "lhs"},
@@ -1250,7 +1240,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 				// We set hExpand true here so that the
 				// attachments/detachments UI doesn't cause the
 				// first column to expand.
-				{1, 1, Label{widgetBase: widgetBase{hExpand: true}, text: fromString}},
+				{1, 1, Label{widgetBase: widgetBase{hExpand: true}, text: c.ContactName(msg.from)}},
 			},
 			{
 				{1, 1, Label{
@@ -1784,7 +1774,7 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 			c.outboxUI.Remove(msg.id)
 
 			draft := c.outboxToDraft(msg)
-			c.draftsUI.Add(draft.id, c.contacts[msg.to].name, draft.created.Format(shortTimeFormat), indicatorNone)
+			c.draftsUI.Add(draft.id, c.ContactName(msg.to), draft.created.Format(shortTimeFormat), indicatorNone)
 			c.draftsUI.Select(draft.id)
 			c.drafts[draft.id] = draft
 			c.save()
@@ -1877,7 +1867,7 @@ type nvEntry struct {
 	name, value string
 }
 
-func nameValuesLHS(entries []nvEntry) Widget {
+func nameValuesLHS(entries []nvEntry) Grid {
 	grid := Grid{
 		widgetBase: widgetBase{margin: 6, name: "lhs"},
 		rowSpacing: 3,
@@ -1900,7 +1890,7 @@ func nameValuesLHS(entries []nvEntry) Widget {
 			GridE{1, 1, Label{
 				widgetBase: widgetBase{font: font},
 				text:       ent.value,
-				selectable: true,
+				selectable: false,
 			}},
 		})
 	}
@@ -2122,6 +2112,14 @@ func (c *guiClient) showContact(id uint64) interface{} {
 					text: "Delete",
 				}},
 			},
+			{
+				{1, 1, Button{
+					widgetBase: widgetBase{
+						name: "edit",
+					},
+					text: "Edit",
+				}},
+			},
 		},
 	}
 
@@ -2131,19 +2129,33 @@ func (c *guiClient) showContact(id uint64) interface{} {
 	c.gui.Signal()
 
 	deleteArmed := false
+	editArmed := false
 
 	for {
 		event, wanted := c.nextEvent(0)
+		click, ok := event.(Click)
 		if wanted {
+			n := click.entries["name"]
+			if contact.name == n {
+				return event
+			}
+			for _, t := range c.contacts {
+				if t.name == n {
+					c.log.Printf("Another contact already has the name %s.\n", n)
+					return event
+				}
+			}
+			c.save()
+			c.gui.Actions() <- UIState{uiStateMain}
+			c.gui.Signal()
 			return event
 		}
-
-		click, ok := event.(Click)
 		if !ok {
 			continue
 		}
 
-		if click.name == "delete" {
+		switch click.name {
+		case "delete":
 			if deleteArmed {
 				c.gui.Actions() <- Sensitive{name: "delete", sensitive: false}
 				c.gui.Signal()
@@ -2156,6 +2168,60 @@ func (c *guiClient) showContact(id uint64) interface{} {
 			} else {
 				deleteArmed = true
 				c.gui.Actions() <- SetButtonText{name: "delete", text: "Confirm"}
+				c.gui.Signal()
+			}
+		case "edit":
+			if editArmed {
+				editArmed = false
+				newName := click.entries["name"]
+				contact.name = newName
+				c.contactsUI.SetLine(contact.id, newName)
+				entries = []nvEntry{
+					{"NAME", contact.name},
+					{"SERVER", contact.theirServer},
+					{"PUBLIC IDENTITY", fmt.Sprintf("%x", contact.theirIdentityPublic[:])},
+					{"PUBLIC KEY", fmt.Sprintf("%x", contact.theirPub[:])},
+					{"LAST DH", fmt.Sprintf("%x", contact.theirLastDHPublic[:])},
+					{"CURRENT DH", fmt.Sprintf("%x", contact.theirCurrentDHPublic[:])},
+					{"GROUP GENERATION", fmt.Sprintf("%d", contact.generation)},
+					{"CLIENT VERSION", fmt.Sprintf("%d", contact.supportedVersion)},
+				}
+				left := nameValuesLHS(entries)
+				c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
+        // update the inboxUI and outboxUI message for current contact name change
+        for _, msg := range c.inbox {
+          if msg.from == contact.id {
+            c.inboxUI.SetLine(msg.id, newName)
+          }
+        }
+
+        for _, msg := range c.outbox {
+          if msg.to == contact.id {
+            c.outboxUI.SetLine(msg.id, newName)
+          }
+        }
+
+        for _, msg := range c.drafts {
+          if msg.to == contact.id {
+            c.draftsUI.SetLine(msg.id, newName)
+          }
+        }
+
+				c.gui.Actions() <- UIState{uiStateShowContact}
+				c.gui.Actions() <- SetButtonText{name: "edit", text: "Edit"}
+				c.gui.Signal()
+				c.save()
+			} else {
+				editArmed = true
+				left.rows[0][1].widget = Entry{
+					// Can we copy the font from left.rows[0][1].widget.widgetBase.font somehow?
+					widgetBase:     widgetBase{name: "name"},
+					text:           contact.name,
+					updateOnChange: true,
+				}
+				c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
+				c.gui.Actions() <- UIState{uiStateShowContact}
+				c.gui.Actions() <- SetButtonText{name: "edit", text: "Done"}
 				c.gui.Signal()
 			}
 		}
