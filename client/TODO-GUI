@@ -1,4 +1,4 @@
-GUI
+= GUI
 
 - notes: notes about a contact, text that gets stored in the state file
 - suggest: suggest contact
@@ -6,3 +6,9 @@ GUI
   - two drop downs, and a text field + generate button (existing code)
   - send a message to each recipient with the secret shared key
   - also send the user's public id via message (to help verify)
+  - filter the drop-downs to only include non-pending contacts
+
+= GUI BUGS
+
+- suggest
+  - depending on UI state, sometimes pressing 'Invite' button does not update the view
