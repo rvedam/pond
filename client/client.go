@@ -1408,7 +1408,10 @@ func (c *client) findPandaURLs(sender uint64,s string) ([]ProposedContact) {
 	re := regexp.MustCompile("(pond-add-panda)://([:graph:]+)/([:xdigit:]{64})/([:xdigit:]{64})/([:graph:]+)/")
 	ms := re.FindAllStringSubmatch(s,-1)  // -1 means find all
 	for _, m := range ms {
-		// if ! isValidSecretString(generatedSecretStringPrefix + m[0]) { }
+		// No reason to require this I guess 
+		if ! isValidSecretString(generatedSecretStringPrefix + m[0]) { 
+			c.log.Printf("Warning : Possibly weak secret %s for %s.",m[0],m[4]); 
+		}
 		var pc ProposedContact
 		pc.pandaSecret = m[1]
 		if ! hexDecodeOk(pc.theirPub[:],m[2]) { 
