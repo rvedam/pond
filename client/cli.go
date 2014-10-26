@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"sync"
 	"syscall"
@@ -979,20 +978,6 @@ func (c *cliClient) draftsSummary() (table cliTable) {
 	return
 }
 
-type contactList []*Contact
-
-func (cl contactList) Len() int {
-	return len(cl)
-}
-
-func (cl contactList) Less(i, j int) bool {
-	return cl[i].name < cl[j].name
-}
-
-func (cl contactList) Swap(i, j int) {
-	cl[i], cl[j] = cl[j], cl[i]
-}
-
 func (c *cliClient) contactsSummary() (table cliTable) {
 	if len(c.contacts) == 0 {
 		return
@@ -1003,12 +988,7 @@ func (c *cliClient) contactsSummary() (table cliTable) {
 		rows:    make([]cliRow, 0, len(c.contacts)),
 	}
 
-	contacts := contactList(make([]*Contact, 0, len(c.contacts)))
-	for i := range c.contacts {
-		contacts = append(contacts, c.contacts[i])
-	}
-
-	sort.Sort(contacts)
+	contacts := c.client.ContactsSorted()
 
 	for _, contact := range contacts {
 		if contact.cliId == invalidCliId {
@@ -1135,6 +1115,10 @@ func (c *cliClient) processCommand(cmd interface{}) (shouldQuit bool) {
 
 	case editCommand:
 		if draft, ok := c.currentObj.(*Draft); ok {
+			if draft.to == 0 {
+				c.Printf("%s Draft was created in the GUI and doesn't have a destination specified. Please use the GUI to manipulate this draft.\n", termErrPrefix)
+				return
+			}
 			c.compose(nil, draft, nil)
 		} else {
 			c.Printf("%s Select draft first\n", termWarnPrefix)
