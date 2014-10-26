@@ -498,7 +498,7 @@ func (cl contactList) Swap(i, j int) {
 	cl[i], cl[j] = cl[j], cl[i]
 }
 
-func (c *client) ContactsSorted() ([]*Contact) {
+func (c *client) contactsSorted() ([]*Contact) {
 	contacts := contactList(make([]*Contact, 0, len(c.contacts)))
 	for i := range c.contacts {
 		contacts = append(contacts, c.contacts[i])
@@ -1436,6 +1436,51 @@ func (c *client) findPandaURLs(sender uint64,s string) ([]ProposedContact) {
 	return l
 }
 
+/*
+func (c *client) BeginProposedContactPANDA(pc ProposedContact) Contact {
+
+	// nextRow := len(grid.rows)
+
+	contact = &Contact{
+		name:      pc.name,
+		isPending: true,
+		id:        c.randId(),
+		// Actually these go into the log :
+		// theirPub:  pc.theirPub,
+		// theirIdentityPublic: pc.theirIdentityPublic,
+	}
+
+	// c.gui.Actions() <- SetText{name: "error1", text: ""}
+	// c.gui.Actions() <- Sensitive{name: "name", sensitive: false}
+	// c.gui.Signal()
+
+	c.newKeyExchange(contact)
+
+	// for _, row := range rows {
+	//	c.gui.Actions() <- InsertRow{name: "grid", pos: nextRow, row: row}
+	//	nextRow++
+	// }
+	// c.gui.Actions() <- UIState{uiStateNewContact2}
+	// c.gui.Signal()
+
+	kx, err := panda.NewKeyExchange(c.rand, mp, &secret, contact.kxsBytes)
+	if err != nil {
+		panic(err)
+	}
+	kx.Testing = c.testing
+	contact.pandaKeyExchange = kx.Marshal()
+	contact.kxsBytes = nil
+	// break SharedSecretEvent
+
+	c.save()
+	c.pandaWaitGroup.Add(1)
+	contact.pandaShutdownChan = make(chan struct{})
+	go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
+	// return c.showContact(contact.id)
+
+	return contact
+}
+*/
 
 func openAttachment(path string) (contents []byte, size int64, err error) {
 	file, err := os.Open(path)
