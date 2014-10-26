@@ -73,7 +73,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	"net/url"
+	"net/url" 
+	"regexp"
 
 	"code.google.com/p/go.crypto/curve25519"
 	"code.google.com/p/go.crypto/nacl/secretbox"
@@ -1290,40 +1291,122 @@ type pandaUpdate struct {
 	serialised []byte
 }
 
-func (c *client) suggestURLpair(id1,id2 uint64) (string,string) {
+
+func (c *client) suggestPandaURLpair(id1,id2 uint64) (string,string) {
 	panda_secret := panda.NewSecretString(c.rand)[2:]
 	s := func(id uint64) (string) {
 		cnt := c.contacts[id]
-		return fmt.Sprintf("pond-add-panda:/%s/%s/%s/%s/\n",panda_secret,
-			cnt.theirPub,cnt.theirIdentityPublic,url.QueryEscape(cnt.name))
+		return fmt.Sprintf("pond-add-panda://%s/%x/%x/%s/\n",panda_secret,
+			cnt.theirPub,cnt.theirIdentityPublic, // no EncodeToString?
+			url.QueryEscape(cnt.name))
 	}
 	return s(id1), s(id2)
 }
 
-func (c *client) suggestURLs_onemany(ids []uint64) ([]string) {
+func (c *client) suggestPandaURLs_onemany(ids []uint64) ([]string) {
 	var urls []string = make([]string,len(ids))
 	id1 := ids[0]
 	for i, id2 := range ids {
 		if i==0 { continue }
-		u1,u2 := c.suggestURLpair(id1,id2)
+		u1,u2 := c.suggestPandaURLpair(id1,id2)
 		urls[0] += u1 
 		urls[i] = u2
 	}
 	return urls
 }
 
-func (c *client) suggestURLs_group(ids []uint64) ([]string) { 
+func (c *client) suggestPandaURLs_group(ids []uint64) ([]string) { 
 	n := len(ids)
 	var urls []string = make([]string,len(ids))
 	for i := 0; i < n; i++ {
 		for j := i+1; i < n; i++ {
-			ui,uj := c.suggestURLpair(ids[i],ids[j])
+			ui,uj := c.suggestPandaURLpair(ids[i],ids[j])
 			urls[i] += ui 
 			urls[j] += uj 
 		}
 	}	
 	return urls
 }
+
+type ProposedContact struct {
+	pandaSecret string
+	theirPub [32]byte
+	theirIdentityPublic [32]byte
+	name string
+	id uint64  // zero if new or failed
+}
+
+func (c *client) checkProposedContactPublics(sender uint64,pc ProposedContact) {
+	for _, contact := range c.contacts {
+		a := pc.theirPub == contact.theirPub
+		b := pc.theirIdentityPublic == contact.theirIdentityPublic
+		if (!a && !b) {
+			return
+		}
+		if a && b {
+			pc.id = contact.id
+		}
+		msgs := map[bool]string{
+			true: "key",
+			false: "identity",
+		}
+		e := fmt.Sprintf("Only public %s but not public %s matched %s in suggestion of %s from %s.",
+			msgs[a],msgs[!a],
+			contact.name,pc.name,c.contacts[sender].name); 
+		c.logEvent(contact,e)
+		c.logEvent(c.contacts[sender],e)
+		c.log.Printf("Warning : %s",e)
+	}
+}
+
+func (c *client) checkProposedContactName(sender uint64,pc ProposedContact) {
+	// We should at least alphabatize the contacts listing or do stuff here.
+	// We should consider using JaroWinkler or Levenshtein from 
+	// "github.com/antzucaro/matchr" here :
+	//   https://godoc.org/github.com/antzucaro/matchr#JaroWinkler
+	// Or maybe a fast fuzzy spelling suggestion algorithm 
+	//   https://github.com/sajari/fuzzy
+	// for _, contact := range c.contacts { }
+}
+
+func hexDecodeOk(dst []byte, src string) bool {
+	l := len(dst) // amazingly this actually works if you call using [:]
+	if hex.DecodedLen(len(src)) != l { return false }
+	s := []byte(src)
+	n, err := hex.Decode(dst,s)
+	if err != nil || n != l { return false }
+	return true
+}
+
+func (c *client) findPandaURLs(sender uint64,s string) ([]ProposedContact) {
+	var l []ProposedContact
+	re := regexp.MustCompile("(pond-add-panda)://([:graph:]+)/([:xdigit:]{64})/([:xdigit:]{64})/([:graph:]+)/")
+	ms := re.FindAllStringSubmatch(s,-1)  // -1 means find all
+	for _, m := range ms {
+		// if ! isValidSecretString(generatedSecretStringPrefix + m[0]) { }
+		var pc ProposedContact
+		pc.pandaSecret = m[1]
+		if ! hexDecodeOk(pc.theirPub[:],m[2]) { 
+			c.log.Printf("Warning : Bad public key %s, skipping.",m[2]); 
+			continue
+		}
+		if ! hexDecodeOk(pc.theirIdentityPublic[:],m[3]) {
+			c.log.Printf("Warning : Bad public identity %s, skipping.",m[3]); 
+			continue
+		}
+		n, err := url.QueryUnescape(m[4])
+		if err != nil { 
+			c.log.Printf("Warning : Badly escaped name %s, fix using rename.",m[4]); 
+		} else {
+			pc.name = n
+		}
+		l = append(l,pc)
+		c.checkProposedContactPublics(sender,pc)
+		c.checkProposedContactName(sender,pc)
+	}
+	return l
+}
+
 
 func openAttachment(path string) (contents []byte, size int64, err error) {
 	file, err := os.Open(path)
