@@ -1409,9 +1409,10 @@ func (c *client) findPandaURLs(sender uint64,s string) ([]ProposedContact) {
 	ms := re.FindAllStringSubmatch(s,-1)  // -1 means find all
 	for _, m := range ms {
 		// No reason to require this I guess 
-		// if ! panda.isValidSecretString(generatedSecretStringPrefix + m[0]) { 
-		//	c.log.Printf("Warning : Possibly weak secret %s for %s.",m[0],m[4]); 
-		// }
+		if ! panda.IsAcceptableSecretString(m[0]) {
+		// && ! panda.isValidSecretString(generatedSecretStringPrefix + m[0])  
+			c.log.Printf("Warning : Possibly weak secret %s for %s.",m[0],m[4]); 
+		}
 		var pc ProposedContact
 		pc.pandaSecret = m[1]
 		if ! hexDecodeOk(pc.theirPub[:],m[2]) { 
