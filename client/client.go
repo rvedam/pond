@@ -1361,7 +1361,7 @@ type ProposedContact struct {
 	id uint64  // zero if new or failed
 }
 
-func (c *client) checkProposedContactPublics(sender uint64,pc ProposedContact) bool {
+func (c *client) checkProposedContactPublics(sender uint64,pc ProposedContact) {
 	for _, contact := range c.contacts {
 		a := pc.theirPub == contact.theirPub
 		b := pc.theirIdentityPublic == contact.theirIdentityPublic
@@ -1393,7 +1393,7 @@ func (c *client) findContactByName(name string) uint64 {
 	return 0
 }
 
-func (c *client) checkProposedContactName(sender uint64,pc ProposedContact) bool {
+func (c *client) checkProposedContactName(sender uint64,pc ProposedContact) {
 	// We should consider using JaroWinkler or Levenshtein from 
 	// "github.com/antzucaro/matchr" here :
 	//   https://godoc.org/github.com/antzucaro/matchr#JaroWinkler
@@ -1401,17 +1401,25 @@ func (c *client) checkProposedContactName(sender uint64,pc ProposedContact) bool
 	//   https://github.com/sajari/fuzzy
 	// for _, contact := range c.contacts { }
 	// At least we now alphabatize the contacts listing however.
-	for id := c.findContactByName(pc.name) != 0 {
-		s := fmt.Sprintf("/iffy-%s",newCliId())
-		c.log.Printf("Another contact is already named %s, appending %s.  Rename them, but make sure nothing nefarious happened.",
-			pc.name,s,); 
-		pc.name += s
-		e := fmt.Sprintf("Suggested contact %s by %s was originally named %s.  Verify that nothing nefarious happened and rename them if desired.", 
-			pc.name,c.contacts[sender].name,contact.name); 
-		c.logEvent(contact,e)
-		c.logEvent(c.contacts[sender],e)
-		// We need to be able to logEvent to the proposed contact here too.
+	var s string
+	id1 := c.findContactByName(pc.name)
+	if id1 == 0 { return }
+	for {
+		var buf [2]byte
+		c.randBytes(buf[:])
+		s = fmt.Sprintf("/%s",buf)
+		id := c.findContactByName(pc.name + s)
+		if id == 0 { break }
 	}
+	c.log.Printf("Another contact is already named %s, appending %s.  Rename them, but make sure nothing nefarious happened.",
+		pc.name,s); 
+	pc.name += s
+
+	e := fmt.Sprintf("Suggested contact %s from %s was originally named %s.  Verify that nothing nefarious happened and rename them if desired.", 
+			pc.name,c.contacts[sender].name,c.contacts[id1].name); 
+	c.logEvent(c.contacts[id1],e)
+	c.logEvent(c.contacts[sender],e)
+	// We need to be able to logEvent to the proposed contact here too.
 }
 
 func hexDecodeSafe(dst []byte, src string) bool {
@@ -1448,13 +1456,15 @@ func (c *client) findPandaURLs(sender uint64,s string) ([]ProposedContact) {
 			pc.name = n
 		}
 		l = append(l,pc)
+		// We allow contacts to be added even if they fail these checks because
+		// maybe they're the legit contact and the existing one is bad.
 		c.checkProposedContactPublics(sender,pc)
 		c.checkProposedContactName(sender,pc)
 	}
 	return l
 }
 
-func (c *client) beginPandaKeyExchange(contact Contact,secret SharedSecret) {
+func (c *client) beginPandaKeyExchange(contact *Contact,secret panda.SharedSecret) {
 	if c.findContactByName(contact.name) != 0 {
 		c.log.Printf("A contact by the name %s already exists, this is an internal error.",contact.name);
 		return
@@ -1479,13 +1489,13 @@ func (c *client) beginPandaKeyExchange(contact Contact,secret SharedSecret) {
 	go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
 }
 
-func (c *client) beginProposedPandaKeyExchange(pc ProposedContact,sharedSecret string) Contact {
+func (c *client) beginProposedPandaKeyExchange(pc ProposedContact,sharedSecret string) *Contact {
 	if len(sharedSecret) == 0 || ! panda.IsAcceptableSecretString(sharedSecret) {
 		c.log.Printf("Unacceptably weak secret '%s'.",sharedSecret);
 		return nil
 	}
 
-	contact = &Contact{
+	contact := &Contact{
 		name:      pc.name,
 		isPending: true,
 		id:        c.randId(),
@@ -1501,7 +1511,7 @@ func (c *client) beginProposedPandaKeyExchange(pc ProposedContact,sharedSecret s
 		Secret: sharedSecret,
 		Cards:  *stack,
 	}
-	beginPandaKeyExchange(secret)
+	c.beginPandaKeyExchange(contact,secret)
 	return contact
 }
 
