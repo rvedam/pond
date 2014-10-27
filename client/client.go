@@ -1431,10 +1431,12 @@ func hexDecodeSafe(dst []byte, src string) bool {
 	return true
 }
 
-func (c *client) findPandaURLs(sender uint64,s string) ([]ProposedContact) {
+// Finds and parses all the pond-add-panda URLs in a message body.
+// Returns a list of ProposedContacts from which to create add contact buttons.
+func (c *client) parsePandaURLs(sender uint64,body string) ([]ProposedContact) {
 	var l []ProposedContact
 	re := regexp.MustCompile("(pond-add-panda)://([:graph:]+)/([:xdigit:]{64})/([:xdigit:]{64})/([:graph:]+)/")
-	ms := re.FindAllStringSubmatch(s,-1)  // -1 means find all
+	ms := re.FindAllStringSubmatch(body,-1)  // -1 means find all
 	for _, m := range ms {
 		if ! panda.IsAcceptableSecretString(m[0]) {
 			c.log.Printf("Unacceptably weak secret '%s' for %s.",m[0],m[4]); 
@@ -1464,6 +1466,9 @@ func (c *client) findPandaURLs(sender uint64,s string) ([]ProposedContact) {
 	return l
 }
 
+// Add a contact using PANDA using the panda.SharedSecret and the basic 
+// contact struct.  Abstracted from the CLI's processCommand(...) and
+// beginProposedPandaKeyExchange(...)
 func (c *client) beginPandaKeyExchange(contact *Contact,secret panda.SharedSecret) {
 	if c.findContactByName(contact.name) != 0 {
 		c.log.Printf("A contact by the name %s already exists, this is an internal error.",contact.name);
@@ -1489,9 +1494,11 @@ func (c *client) beginPandaKeyExchange(contact *Contact,secret panda.SharedSecre
 	go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
 }
 
-func (c *client) beginProposedPandaKeyExchange(pc ProposedContact,sharedSecret string) *Contact {
-	if len(sharedSecret) == 0 || ! panda.IsAcceptableSecretString(sharedSecret) {
-		c.log.Printf("Unacceptably weak secret '%s'.",sharedSecret);
+// Add a ProposedContact using PANDA once by building panda.SharedSecret and
+// the basic contact struct to call beginPandaKeyExchange.  
+func (c *client) beginProposedPandaKeyExchange(pc ProposedContact) *Contact {
+	if len(pc.sharedSecret) == 0 || ! panda.IsAcceptableSecretString(pc.sharedSecret) {
+		c.log.Printf("Unacceptably weak secret '%s'.",pc.sharedSecret);
 		return nil
 	}
 
@@ -1508,7 +1515,7 @@ func (c *client) beginProposedPandaKeyExchange(pc ProposedContact,sharedSecret s
 		NumDecks: 1,
 	}
 	secret := panda.SharedSecret{
-		Secret: sharedSecret,
+		Secret: pc.sharedSecret,
 		Cards:  *stack,
 	}
 	c.beginPandaKeyExchange(contact,secret)
