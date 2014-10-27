@@ -1354,19 +1354,19 @@ func (c *client) suggestPandaURLs_group(ids []uint64) ([]string) {
 }
 
 type ProposedContact struct {
-	pandaSecret string
+	sharedSecret string
 	theirPub [32]byte
 	theirIdentityPublic [32]byte
 	name string
 	id uint64  // zero if new or failed
 }
 
-func (c *client) checkProposedContactPublics(sender uint64,pc ProposedContact) {
+func (c *client) checkProposedContactPublics(sender uint64,pc ProposedContact) bool {
 	for _, contact := range c.contacts {
 		a := pc.theirPub == contact.theirPub
 		b := pc.theirIdentityPublic == contact.theirIdentityPublic
 		if (!a && !b) {
-			return
+			continue
 		}
 		if a && b {
 			pc.id = contact.id
@@ -1375,26 +1375,46 @@ func (c *client) checkProposedContactPublics(sender uint64,pc ProposedContact) {
 			true: "key",
 			false: "identity",
 		}
-		e := fmt.Sprintf("Only public %s but not public %s matched %s in suggestion of %s from %s.",
+		e := fmt.Sprintf("Only public %s but not public %s matched %s in suggestion of %s from %s, this should never happen.",
 			msgs[a],msgs[!a],
 			contact.name,pc.name,c.contacts[sender].name); 
 		c.logEvent(contact,e)
 		c.logEvent(c.contacts[sender],e)
-		c.log.Printf("Warning : %s",e)
+		c.log.Printf("%s",e)
 	}
 }
 
-func (c *client) checkProposedContactName(sender uint64,pc ProposedContact) {
-	// We should at least alphabatize the contacts listing or do stuff here.
+func (c *client) findContactByName(name string) uint64 {
+	for _, contact := range c.contacts {
+		if contact.name == name {
+			return contact.id
+		}
+	}
+	return 0
+}
+
+func (c *client) checkProposedContactName(sender uint64,pc ProposedContact) bool {
 	// We should consider using JaroWinkler or Levenshtein from 
 	// "github.com/antzucaro/matchr" here :
 	//   https://godoc.org/github.com/antzucaro/matchr#JaroWinkler
 	// Or maybe a fast fuzzy spelling suggestion algorithm 
 	//   https://github.com/sajari/fuzzy
 	// for _, contact := range c.contacts { }
+	// At least we now alphabatize the contacts listing however.
+	for id := c.findContactByName(pc.name) != 0 {
+		s := fmt.Sprintf("/iffy-%s",newCliId())
+		c.log.Printf("Another contact is already named %s, appending %s.  Rename them, but make sure nothing nefarious happened.",
+			pc.name,s,); 
+		pc.name += s
+		e := fmt.Sprintf("Suggested contact %s by %s was originally named %s.  Verify that nothing nefarious happened and rename them if desired.", 
+			pc.name,c.contacts[sender].name,contact.name); 
+		c.logEvent(contact,e)
+		c.logEvent(c.contacts[sender],e)
+		// We need to be able to logEvent to the proposed contact here too.
+	}
 }
 
-func hexDecodeOk(dst []byte, src string) bool {
+func hexDecodeSafe(dst []byte, src string) bool {
 	l := len(dst) // amazingly this actually works if you call using [:]
 	if hex.DecodedLen(len(src)) != l { return false }
 	s := []byte(src)
@@ -1408,24 +1428,22 @@ func (c *client) findPandaURLs(sender uint64,s string) ([]ProposedContact) {
 	re := regexp.MustCompile("(pond-add-panda)://([:graph:]+)/([:xdigit:]{64})/([:xdigit:]{64})/([:graph:]+)/")
 	ms := re.FindAllStringSubmatch(s,-1)  // -1 means find all
 	for _, m := range ms {
-		// No reason to require this I guess 
 		if ! panda.IsAcceptableSecretString(m[0]) {
-		// && ! panda.isValidSecretString(generatedSecretStringPrefix + m[0])  
-			c.log.Printf("Warning : Possibly weak secret %s for %s.",m[0],m[4]); 
+			c.log.Printf("Unacceptably weak secret '%s' for %s.",m[0],m[4]); 
 		}
 		var pc ProposedContact
-		pc.pandaSecret = m[1]
-		if ! hexDecodeOk(pc.theirPub[:],m[2]) { 
-			c.log.Printf("Warning : Bad public key %s, skipping.",m[2]); 
+		pc.sharedSecret = m[1]
+		if ! hexDecodeSafe(pc.theirPub[:],m[2]) { 
+			c.log.Printf("Bad public key %s, skipping.",m[2]); 
 			continue
 		}
-		if ! hexDecodeOk(pc.theirIdentityPublic[:],m[3]) {
-			c.log.Printf("Warning : Bad public identity %s, skipping.",m[3]); 
+		if ! hexDecodeSafe(pc.theirIdentityPublic[:],m[3]) {
+			c.log.Printf("Bad public identity %s, skipping.",m[3]); 
 			continue
 		}
 		n, err := url.QueryUnescape(m[4])
 		if err != nil { 
-			c.log.Printf("Warning : Badly escaped name %s, fix using rename.",m[4]); 
+			c.log.Printf("Badly escaped name %s, fix using rename.",m[4]);
 		} else {
 			pc.name = n
 		}
@@ -1436,10 +1454,36 @@ func (c *client) findPandaURLs(sender uint64,s string) ([]ProposedContact) {
 	return l
 }
 
-/*
-func (c *client) BeginProposedContactPANDA(pc ProposedContact) Contact {
+func (c *client) beginPandaKeyExchange(contact Contact,secret SharedSecret) {
+	if c.findContactByName(contact.name) != 0 {
+		c.log.Printf("A contact by the name %s already exists, this is an internal error.",contact.name);
+		return
+	}
 
-	// nextRow := len(grid.rows)
+	c.newKeyExchange(contact)
+
+	mp := c.newMeetingPlace()
+
+	c.contacts[contact.id] = contact
+	kx, err := panda.NewKeyExchange(c.rand, mp, &secret, contact.kxsBytes)
+	if err != nil {
+		panic(err)
+	}
+	kx.Testing = c.testing
+	contact.pandaKeyExchange = kx.Marshal()
+	contact.kxsBytes = nil
+
+	c.save()
+	c.pandaWaitGroup.Add(1)
+	contact.pandaShutdownChan = make(chan struct{})
+	go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
+}
+
+func (c *client) beginProposedPandaKeyExchange(pc ProposedContact,sharedSecret string) Contact {
+	if len(sharedSecret) == 0 || ! panda.IsAcceptableSecretString(sharedSecret) {
+		c.log.Printf("Unacceptably weak secret '%s'.",sharedSecret);
+		return nil
+	}
 
 	contact = &Contact{
 		name:      pc.name,
@@ -1450,37 +1494,17 @@ func (c *client) BeginProposedContactPANDA(pc ProposedContact) Contact {
 		// theirIdentityPublic: pc.theirIdentityPublic,
 	}
 
-	// c.gui.Actions() <- SetText{name: "error1", text: ""}
-	// c.gui.Actions() <- Sensitive{name: "name", sensitive: false}
-	// c.gui.Signal()
-
-	c.newKeyExchange(contact)
-
-	// for _, row := range rows {
-	//	c.gui.Actions() <- InsertRow{name: "grid", pos: nextRow, row: row}
-	//	nextRow++
-	// }
-	// c.gui.Actions() <- UIState{uiStateNewContact2}
-	// c.gui.Signal()
-
-	kx, err := panda.NewKeyExchange(c.rand, mp, &secret, contact.kxsBytes)
-	if err != nil {
-		panic(err)
+	stack := &panda.CardStack{
+		NumDecks: 1,
 	}
-	kx.Testing = c.testing
-	contact.pandaKeyExchange = kx.Marshal()
-	contact.kxsBytes = nil
-	// break SharedSecretEvent
-
-	c.save()
-	c.pandaWaitGroup.Add(1)
-	contact.pandaShutdownChan = make(chan struct{})
-	go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
-	// return c.showContact(contact.id)
-
+	secret := panda.SharedSecret{
+		Secret: sharedSecret,
+		Cards:  *stack,
+	}
+	beginPandaKeyExchange(secret)
 	return contact
 }
-*/
+
 
 func openAttachment(path string) (contents []byte, size int64, err error) {
 	file, err := os.Open(path)

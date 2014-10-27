@@ -1584,21 +1584,7 @@ Handle:
 			Cards:  *stack,
 		}
 
-		mp := c.newMeetingPlace()
-
-		c.contacts[contact.id] = contact
-		kx, err := panda.NewKeyExchange(c.rand, mp, &secret, contact.kxsBytes)
-		if err != nil {
-			panic(err)
-		}
-		kx.Testing = c.testing
-		contact.pandaKeyExchange = kx.Marshal()
-		contact.kxsBytes = nil
-
-		c.save()
-		c.pandaWaitGroup.Add(1)
-		contact.pandaShutdownChan = make(chan struct{})
-		go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
+		c.beginPandaKeyExchange(contact,secret)
 		c.Printf("%s Key exchange running in background.\n", termPrefix)
 
 	case renameCommand:
@@ -1826,11 +1812,9 @@ func (c *cliClient) renameContact(contact *Contact, newName string) {
 		return
 	}
 
-	for _, contact := range c.contacts {
-		if contact.name == newName {
-			c.Printf("%s Another contact already has that name.\n", termErrPrefix)
-			return
-		}
+	if c.findContactByName(newName) != 0 {
+		c.Printf("%s Another contact already has that name.\n", termErrPrefix)
+		return
 	}
 
 	contact.name = newName
