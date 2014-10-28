@@ -1317,7 +1317,7 @@ type pandaUpdate struct {
 }
 
 
-func (c *client) suggestPandaURLpair(id1,id2 uint64) (string,string) {
+func (c *client) introducePandaURLpair(id1,id2 uint64) (string,string) {
 	panda_secret := panda.NewSecretString(c.rand)[2:]
 	s := func(id uint64) (string) {
 		cnt := c.contacts[id]
@@ -1328,24 +1328,24 @@ func (c *client) suggestPandaURLpair(id1,id2 uint64) (string,string) {
 	return s(id1), s(id2)
 }
 
-func (c *client) suggestPandaURLs_onemany(ids []uint64) ([]string) {
+func (c *client) introducePandaURLs_onemany(ids []uint64) ([]string) {
 	var urls []string = make([]string,len(ids))
 	id1 := ids[0]
 	for i, id2 := range ids {
 		if i==0 { continue }
-		u1,u2 := c.suggestPandaURLpair(id1,id2)
+		u1,u2 := c.introducePandaURLpair(id1,id2)
 		urls[0] += u1 
 		urls[i] = u2
 	}
 	return urls
 }
 
-func (c *client) suggestPandaURLs_group(ids []uint64) ([]string) { 
+func (c *client) introducePandaURLs_group(ids []uint64) ([]string) { 
 	n := len(ids)
 	var urls []string = make([]string,len(ids))
 	for i := 0; i < n; i++ {
 		for j := i+1; i < n; i++ {
-			ui,uj := c.suggestPandaURLpair(ids[i],ids[j])
+			ui,uj := c.introducePandaURLpair(ids[i],ids[j])
 			urls[i] += ui 
 			urls[j] += uj 
 		}
