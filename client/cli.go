@@ -978,19 +978,21 @@ func (c *cliClient) draftsSummary() (table cliTable) {
 	return
 }
 
-func (c *cliClient) contactsSummary() (table cliTable) {
+func (c *cliClient) contactsSummaryRaw(title string,
+			filter func (*Contact) bool) (table cliTable) {
 	if len(c.contacts) == 0 {
 		return
 	}
 
 	table = cliTable{
-		heading: "Contacts",
+		heading: title,
 		rows:    make([]cliRow, 0, len(c.contacts)),
 	}
 
 	contacts := c.contactsSorted()
 
 	for _, contact := range contacts {
+		if ! filter(contact) { continue }
 		if contact.cliId == invalidCliId {
 			contact.cliId = c.newCliId()
 		}
@@ -1010,6 +1012,10 @@ func (c *cliClient) contactsSummary() (table cliTable) {
 	}
 
 	return
+}
+
+func (c *cliClient) contactsSummary() (cliTable) {
+	return c.contactsSummaryRaw("Contacts",func (c *Contact) bool { return true })
 }
 
 func (c *cliClient) showQueueState() {
@@ -1421,6 +1427,7 @@ Handle:
 		draft, ok := c.currentObj.(*Draft)
 		if !ok {
 			c.Printf("%s Select draft first\n", termWarnPrefix)
+			return
 		}
 		contents, size, err := openAttachment(cmd.Filename)
 		if err != nil {
@@ -1526,6 +1533,7 @@ Handle:
 		draft, ok := c.currentObj.(*Draft)
 		if !ok {
 			c.Printf("%s Select draft first\n", termWarnPrefix)
+			return
 		}
 		i, ok := c.prepareSubobjectCommand(cmd.Number, len(draft.attachments)+len(draft.detachments), "attachment")
 		if !ok {
