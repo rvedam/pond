@@ -1325,6 +1325,9 @@ type pandaUpdate struct {
 	serialised []byte
 }
 
+const (
+	introducePandaMessageDesc = "Introduction URLs for proposed new contacts :\n"
+)
 
 func (c *client) introducePandaMessages_pair(cnt1,cnt2 *Contact) (string,string) {
 	panda_secret := panda.NewSecretString(c.rand)[2:]

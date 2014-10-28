@@ -1623,10 +1623,11 @@ Handle:
 		for i := range cl {
 			draft := c.newDraft(cl[i],nil)
 			if i == 0 {
-				draft.body = body0 + urls[i]
+				draft.body = body0
 			}	else {
-				draft.body = body_ + urls[i]
+				draft.body = body_ 
 			}
+			draft.body += introducePandaMessageDesc + urls[i]
 			c.sendDraft(draft)
 			c.Printf("%s Sending introduction message %s%s%s to %s\n", termInfoPrefix,
 				termCliIdStart, draft.cliId.String(), termReset, cl[i].name)
@@ -1643,7 +1644,7 @@ Handle:
 		urls := c.introducePandaMessages_group(cl)
 		for i := range cl {
 			draft := c.newDraft(cl[i],nil)
-			draft.body = body + urls[i]
+			draft.body = body + introducePandaMessageDesc + urls[i]
 			c.sendDraft(draft)
 			c.Printf("%s Sending introduction message %s%s%s to %s\n", termInfoPrefix,
 				termCliIdStart, draft.cliId.String(), termReset, cl[i].name)
