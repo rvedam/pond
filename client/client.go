@@ -354,6 +354,15 @@ NextChar:
 	return
 }
 
+func (c *client) cliIdToContact(id cliId) (*Contact) {
+	for _, contact := range c.contacts {
+		if contact.cliId == id {
+			return contact
+		}
+	}
+	return nil
+}
+
 // InboxMessage represents a message in the client's inbox. (Acks also appear
 // as InboxMessages, but their message.Body is empty.)
 type InboxMessage struct {
@@ -1317,35 +1326,34 @@ type pandaUpdate struct {
 }
 
 
-func (c *client) introducePandaURLpair(id1,id2 uint64) (string,string) {
+func (c *client) introducePandaMessages_pair(cnt1,cnt2 *Contact) (string,string) {
 	panda_secret := panda.NewSecretString(c.rand)[2:]
-	s := func(id uint64) (string) {
-		cnt := c.contacts[id]
+	s := func(cnt *Contact) (string) {
 		return fmt.Sprintf("pond-add-panda://%s/%x/%x/%s/\n",panda_secret,
 			cnt.theirPub,cnt.theirIdentityPublic, // no EncodeToString?
 			url.QueryEscape(cnt.name))
 	}
-	return s(id1), s(id2)
+	return s(cnt1), s(cnt1)
 }
 
-func (c *client) introducePandaURLs_onemany(ids []uint64) ([]string) {
-	var urls []string = make([]string,len(ids))
-	id1 := ids[0]
-	for i, id2 := range ids {
+func (c *client) introducePandaMessages_onemany(cnts contactList) ([]string) {
+	var urls []string = make([]string,len(cnts))
+	cnt1 := cnts[0]
+	for i, cnt2 := range cnts {
 		if i==0 { continue }
-		u1,u2 := c.introducePandaURLpair(id1,id2)
+		u1,u2 := c.introducePandaMessages_pair(cnt1,cnt2)
 		urls[0] += u1 
 		urls[i] = u2
 	}
 	return urls
 }
 
-func (c *client) introducePandaURLs_group(ids []uint64) ([]string) { 
-	n := len(ids)
-	var urls []string = make([]string,len(ids))
+func (c *client) introducePandaMessages_group(cnts contactList) ([]string) { 
+	n := len(cnts)
+	var urls []string = make([]string,len(cnts))
 	for i := 0; i < n; i++ {
 		for j := i+1; i < n; i++ {
-			ui,uj := c.introducePandaURLpair(ids[i],ids[j])
+			ui,uj := c.introducePandaMessages_pair(cnts[i],cnts[j])
 			urls[i] += ui 
 			urls[j] += uj 
 		}
