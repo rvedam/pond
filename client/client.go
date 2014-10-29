@@ -1433,7 +1433,7 @@ func (c *client) checkProposedContactName(sender uint64,pc ProposedContact) {
 	// We need to be able to logEvent to the proposed contact here too.
 }
 
-func hexDecodeSafe(dst []byte, src string) bool {
+func HexDecodeOk(dst []byte, src string) bool {
 	l := len(dst) // amazingly this actually works if you call using [:]
 	if hex.DecodedLen(len(src)) != l { return false }
 	s := []byte(src)
@@ -1454,11 +1454,11 @@ func (c *client) parsePandaURLs(sender uint64,body string) ([]ProposedContact) {
 		}
 		var pc ProposedContact
 		pc.sharedSecret = m[1]
-		if ! hexDecodeSafe(pc.theirPub[:],m[2]) { 
+		if ! HexDecodeOk(pc.theirPub[:],m[2]) { 
 			c.log.Printf("Bad public key %s, skipping.",m[2]); 
 			continue
 		}
-		if ! hexDecodeSafe(pc.theirIdentityPublic[:],m[3]) {
+		if ! HexDecodeOk(pc.theirIdentityPublic[:],m[3]) {
 			c.log.Printf("Bad public identity %s, skipping.",m[3]); 
 			continue
 		}

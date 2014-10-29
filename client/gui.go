@@ -1344,6 +1344,8 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 		}
 	}
 
+  suggestedContacts := c.ParsePandaURLs(msg.from, string(msg.message.Body))
+
 	if msg.message != nil && len(msg.message.Files) != 0 {
 		grid := Grid{widgetBase: widgetBase{marginLeft: 25}, rowSpacing: 3}
 
@@ -1371,6 +1373,28 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 		c.gui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{{2, 1, grid}}}
 		lhsNextRow++
 	}
+
+  if msg.message != nil && len(suggestedContacts) == 0 {
+		grid := Grid{widgetBase: widgetBase{marginLeft: 25}, rowSpacing: 3}
+		c.gui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{
+			{1, 1, Label{
+				widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+				text:       "SUGGESTED CONTACTS",
+			}},
+		}}
+
+		lhsNextRow++
+    c.gui.Actions() <- InsertRow{
+      name: "lhs", 
+      pos: lhsNextRow,
+      row: [] GridE{
+        {1, 1, Button{
+          text: "Add",
+        }},
+      }}
+		c.gui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{{2, 1, grid}}}
+		lhsNextRow++
+  }
 
 	if msg.message != nil && len(msg.message.DetachedFiles) != 0 {
 		grid := Grid{widgetBase: widgetBase{name: "detachment-grid", marginLeft: 25}, rowSpacing: 3}
@@ -1436,6 +1460,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 		lhsNextRow++
 		c.gui.Signal()
 	}
+
 
 	c.gui.Actions() <- UIState{uiStateInbox}
 	c.gui.Signal()
