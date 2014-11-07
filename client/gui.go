@@ -2297,6 +2297,26 @@ func (c *guiClient) introduceUI(id uint64) interface{} {
 	var contactLabels []string
 	var contactChecks []bool
 	var contactsBoxes [][]GridE
+	var messageBody string
+	var messageCompose = []GridE {
+		{1,1,nil},
+		{10, 1, Scrolled{
+			widgetBase: widgetBase{expand: true, fill: true},
+			horizontal: true,
+			child: TextView{
+				widgetBase:     widgetBase{expand: true, fill: true, name: "body"},
+				editable:       true,
+				wrap:           true,
+				updateOnChange: true,
+				spellCheck:     true,
+				text:           messageBody,
+			},
+		}},
+		{1,1, Button{
+			widgetBase: widgetBase{width: 40, name: "doIntroduce"},
+			text:       "Introduce",
+		}},
+	}
 	var contactsBoxesLine []GridE
 	contactsBoxesLine = []GridE{ {1,1,nil}, }
 	var i int
@@ -2372,6 +2392,7 @@ func (c *guiClient) introduceUI(id uint64) interface{} {
 			},
 		},contactsBoxes...),
 	}
+	grid1.rows = append(grid1.rows, messageCompose)
 
 	getId := func (name string) uint64 {
 		for i, n := range contactLabels {
@@ -2394,6 +2415,8 @@ func (c *guiClient) introduceUI(id uint64) interface{} {
 	c.gui.Actions() <- SetChild{name: "right", child: rightPane("INTRODUCE CONTACTS", grid1, nil, nil)}
 	c.gui.Actions() <- UIState{uiStateIntroduceContact}
 	c.gui.Signal()
+
+	sensitivity()
 
  	for {
 		event, wanted := c.nextEvent(0)
@@ -2443,7 +2466,6 @@ func (c *guiClient) introduceUI(id uint64) interface{} {
 			}
 
 			var urls []string
-			var body string // Do someting with this like in he CLI
 			if id != 0 {
 				urls = c.introducePandaMessages_onemany(cl)
 			} else {
@@ -2451,17 +2473,15 @@ func (c *guiClient) introduceUI(id uint64) interface{} {
 			}
 			for i := range cl {
 				draft := c.newDraft(cl[i],nil)
-				draft.body = body + introducePandaMessageDesc + urls[i]
+				draft.body = messageBody + introducePandaMessageDesc + urls[i]
 				c.sendDraft(draft)
 				c.log.Printf("Sending introduction message to %s\n", cl[i].name)
 			}
 			c.save()
 
-
 			c.gui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
 			c.gui.Actions() <- UIState{uiStateMain}
 			c.gui.Signal()
-			c.save()
 			return nil
 		}
 
