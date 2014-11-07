@@ -70,6 +70,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -351,6 +352,24 @@ NextChar:
 	return
 }
 
+func (c *client) cliIdToContact(id cliId) (*Contact) {
+	for _, contact := range c.contacts {
+		if contact.cliId == id {
+			return contact
+		}
+	}
+	return nil
+}
+
+func hexDecodeSafe(dst []byte, src string) bool {
+	l := len(dst) // amazingly this actually works if you call using [:]
+	if hex.DecodedLen(len(src)) != l { return false }
+	s := []byte(src)
+	n, err := hex.Decode(dst,s)
+	if err != nil || n != l { return false }
+	return true
+}
+
 // InboxMessage represents a message in the client's inbox. (Acks also appear
 // as InboxMessages, but their message.Body is empty.)
 type InboxMessage struct {
@@ -478,6 +497,30 @@ type Contact struct {
 type Event struct {
 	t   time.Time
 	msg string
+}
+
+// clientList is a sortable listing of contacts
+type contactList []*Contact
+
+func (cl contactList) Len() int {
+	return len(cl)
+}
+
+func (cl contactList) Less(i, j int) bool {
+	return cl[i].name < cl[j].name
+}
+
+func (cl contactList) Swap(i, j int) {
+	cl[i], cl[j] = cl[j], cl[i]
+}
+
+func (c *client) contactsSorted() ([]*Contact) {
+	contacts := contactList(make([]*Contact, 0, len(c.contacts)))
+	for i := range c.contacts {
+		contacts = append(contacts, c.contacts[i])
+	}
+	sort.Sort(contacts)
+	return contacts
 }
 
 // previousTagLifetime contains the amount of time that we'll store a previous
@@ -1243,6 +1286,33 @@ func (c *client) runPANDA(serialisedKeyExchange []byte, id uint64, name string, 
 		err:    err,
 		result: result,
 	}
+}
+
+// Launches a runPANDA goroutine based upon a panda.SharedSecret and a
+// preliminary contact struct. 
+func (c *client) beginPandaKeyExchange(contact *Contact,secret panda.SharedSecret) {
+	if c.findContactByName(contact.name) != 0 {
+		c.log.Printf("A contact by the name %s already exists, this is an internal error.",contact.name);
+		return
+	}
+
+	c.newKeyExchange(contact)
+
+	mp := c.newMeetingPlace()
+
+	c.contacts[contact.id] = contact
+	kx, err := panda.NewKeyExchange(c.rand, mp, &secret, contact.kxsBytes)
+	if err != nil {
+		panic(err)
+	}
+	kx.Testing = c.testing
+	contact.pandaKeyExchange = kx.Marshal()
+	contact.kxsBytes = nil
+
+	c.save()
+	c.pandaWaitGroup.Add(1)
+	contact.pandaShutdownChan = make(chan struct{})
+	go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
 }
 
 // processPANDAUpdate runs on the main client goroutine and handles messages
