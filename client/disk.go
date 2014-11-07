@@ -106,6 +106,16 @@ func (c *client) unmarshal(state *disk.State) error {
 			}
 		}
 
+		if cont.IntroducedBy != nil {
+			contact.introducedBy = *cont.IntroducedBy
+		}
+		if cont.VerifiedBy != nil && len(cont.VerifiedBy) > 0 {
+			copy(contact.verifiedBy,cont.VerifiedBy)
+		}
+		if cont.IntroducedTo != nil && len(cont.IntroducedTo) > 0 {
+			copy(contact.introducedTo,cont.IntroducedTo)
+		}
+
 		if cont.IsPending != nil && *cont.IsPending {
 			contact.isPending = true
 		}
@@ -268,7 +278,11 @@ func (c *client) marshal() []byte {
 			PandaKeyExchange: contact.pandaKeyExchange,
 			PandaError:       proto.String(contact.pandaResult),
 			RevokedUs:        proto.Bool(contact.revokedUs),
+			IntroducedBy:     proto.Uint64(contact.introducedBy),
 		}
+		copy(contact.introducedTo,cont.IntroducedTo)
+		copy(contact.verifiedBy,cont.VerifiedBy)
+
 		cont.TheirIdentityPublic = contact.theirIdentityPublic[:]
 		if !contact.isPending {
 			cont.MyGroupKey = contact.myGroupKey.Marshal()
