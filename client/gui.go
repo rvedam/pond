@@ -61,6 +61,7 @@ const (
 	uiStateMain
 	uiStateCreateAccount
 	uiStateCreatePassphrase
+	uiStateIntroduceContact
 	uiStateNewContact
 	uiStateNewContact2
 	uiStateShowContact
@@ -141,7 +142,7 @@ func (c *guiClient) nextEvent(currentMsgId uint64) (event interface{}, wanted bo
 		wanted = true
 	}
 	if click, ok := event.(Click); ok {
-		wanted = wanted || click.name == "newcontact" || click.name == "compose"
+		wanted = wanted || click.name == "newcontact" || click.name == "compose" || click.name == "introduce"
 	}
 	return
 }
@@ -488,6 +489,10 @@ func (c *guiClient) mainUI() {
 													widgetBase: widgetBase{width: 100, name: "newcontact"},
 													text:       "Add",
 												},
+												Button{
+													widgetBase: widgetBase{width: 100, name: "introduce"},
+													text:       "Introduce",
+												},
 											},
 										},
 									},
@@ -652,7 +657,7 @@ func (c *guiClient) mainUI() {
 		}
 		if id, ok := c.draftsUI.Event(event); ok {
 			c.draftsUI.Select(id)
-			nextEvent = c.composeUI(c.drafts[id], nil)
+			nextEvent = c.composeUI(c.drafts[id])
 		}
 
 		click, ok := event.(Click)
@@ -662,8 +667,10 @@ func (c *guiClient) mainUI() {
 		switch click.name {
 		case "newcontact":
 			nextEvent = c.newContactUI(nil)
+		case "introduce":
+			nextEvent = c.introduceUI(0)
 		case "compose":
-			nextEvent = c.composeUI(nil, nil)
+			nextEvent = c.composeUI(nil)
 		}
 	}
 }
@@ -1309,6 +1316,7 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 	// The UI names widgets with strings so these prefixes are used to
 	// generate names for the dynamic parts of the UI.
 	const (
+		greetPrefix              = "greet-"
 		detachmentDecryptPrefix  = "detachment-decrypt-"
 		detachmentVBoxPrefix     = "detachment-decrypt-"
 		detachmentProgressPrefix = "detachment-progress-"
@@ -1316,6 +1324,50 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 		detachmentSavePrefix     = "detachment-save-"
 		attachmentPrefix         = "attachment-"
 	)
+
+	pcs := c.parsePandaURLs(msg.from,string(msg.message.Body))
+	if len(pcs) > 0 {
+		grid := Grid{widgetBase: widgetBase{marginLeft: 25}, rowSpacing: 3}
+
+		for i, pc := range pcs {
+			var greet string
+			if pc.id == 0 {
+				greet = "Greet"
+			} else {
+				cnt := c.contacts[pc.id]
+				if cnt.isPending {
+					greet = "Pending"
+				} else {
+					greet = "Exists"
+				}
+				// Should say Verified if the contact existed previously
+			}
+			grid.rows = append(grid.rows, []GridE{
+				{1, 1, Label{
+					widgetBase: widgetBase{vAlign: AlignCenter, hAlign: AlignStart},
+					text:       maybeTruncate(pc.name),
+				}},
+				{1, 1, Button{
+					widgetBase: widgetBase{
+						name:        fmt.Sprintf("%s%d", greetPrefix, i),
+						insensitive: greet != "Greet",
+					},
+					text: greet,
+				}},
+			})
+		}
+
+		c.gui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{
+			{1, 1, Label{
+				widgetBase: widgetBase{font: fontMainLabel, foreground: colorHeaderForeground, hAlign: AlignEnd, vAlign: AlignCenter},
+				text:       "INTRODUCTIONS",
+			}},
+		}}
+		lhsNextRow++
+		c.gui.Actions() <- InsertRow{name: "lhs", pos: lhsNextRow, row: []GridE{{2, 1, grid}}}
+		lhsNextRow++
+	}
+
 
 	widgetForDetachmentProcess := func(index int) Widget {
 		return VBox{
@@ -1546,6 +1598,14 @@ NextEvent:
 			continue
 		}
 		switch {
+		case strings.HasPrefix(click.name, greetPrefix):
+			i, ok := strconv.Atoi(click.name[len(greetPrefix):])
+			if ok != nil || i >= len(pcs) { panic("invalid greet command") }
+			c.beginProposedPandaKeyExchange(pcs[i])
+			c.gui.Actions() <- Sensitive{name: click.name, sensitive: false}
+			c.gui.Actions() <- SetButtonText{name: click.name, text: "Pending"}
+			c.gui.Signal()
+			continue
 		case strings.HasPrefix(click.name, attachmentPrefix):
 			i, _ := strconv.Atoi(click.name[len(attachmentPrefix):])
 			c.gui.Actions() <- FileOpen{
@@ -1594,7 +1654,7 @@ NextEvent:
 			c.gui.Signal()
 		case click.name == "reply":
 			c.inboxUI.Deselect()
-			return c.composeUI(nil, msg)
+			return c.composeUI(c.newDraftUI(msg,0))
 		case click.name == "delete":
 			c.inboxUI.Remove(msg.id)
 			c.deleteInboxMsg(msg.id)
@@ -1772,7 +1832,7 @@ func (c *guiClient) showOutbox(id uint64) interface{} {
 			c.draftsUI.Select(draft.id)
 			c.drafts[draft.id] = draft
 			c.save()
-			return c.composeUI(draft, nil)
+			return c.composeUI(draft)
 		}
 
 		if click, ok := event.(Click); ok && click.name == "delete" {
@@ -2106,6 +2166,16 @@ func (c *guiClient) showContact(id uint64) interface{} {
 					text: "Delete",
 				}},
 			},
+			{{1,1,nil}},
+			{
+				{1, 1, Button{
+					widgetBase: widgetBase{
+						name: "introduceTo",
+						insensitive: contact.isPending || contact.revokedUs,
+					},
+					text: "Introduce",
+				}},
+			},
 		},
 	}
 
@@ -2206,10 +2276,214 @@ func (c *guiClient) showContact(id uint64) interface{} {
 			c.gui.Signal()
 
 			c.save()
+		case "introduceTo":
+			return c.introduceUI(contact.id)
 		}
 	}
 
 	panic("unreachable")
+}
+
+func (c *guiClient) introduceUI(id uint64) interface{} {
+	const (
+		contactCheckBoxPrefix = "contactchecked-"
+	)
+
+	var contactIds []uint64
+	var contactLabels []string
+	var contactChecks []bool
+	var contactsBoxes [][]GridE
+	var messageBody string
+	var messageCompose = []GridE {
+		{1,1,nil},
+		{10, 1, Scrolled{
+			widgetBase: widgetBase{expand: true, fill: true},
+			horizontal: true,
+			child: TextView{
+				widgetBase:     widgetBase{expand: true, fill: true, name: "body"},
+				editable:       true,
+				wrap:           true,
+				updateOnChange: true,
+				spellCheck:     true,
+				text:           messageBody,
+			},
+		}},
+		{1,1, Button{
+			widgetBase: widgetBase{width: 40, name: ""},
+			text:       "Introduce",
+			name: 		"doIntroduce"
+		}},
+	}
+	var contactsBoxesLine []GridE
+	contactsBoxesLine = []GridE{ {1,1,nil}, }
+	var i int
+	i = 0
+	for _, contact := range c.contacts {
+		if contact.isPending || contact.revokedUs { continue }
+		contactLabels = append(contactLabels, contact.name)
+		contactIds = append(contactIds, contact.id)
+		contactChecks = append(contactChecks, false)
+		contactsBoxesLine = append(contactsBoxesLine,
+			GridE{3, 1, CheckButton{
+				widgetBase: widgetBase{
+					name: fmt.Sprintf("%s%d", contactCheckBoxPrefix, contact.id),
+				},
+				checked: false,
+				text:    contact.name,
+			}},
+			GridE{1,1,nil})
+		if i % 3 == 2 {
+			contactsBoxes = append(contactsBoxes,contactsBoxesLine)
+			contactsBoxesLine = []GridE{ {1,1,nil}, }
+		}
+		i++
+	}
+	contactsBoxes = append(contactsBoxes,contactsBoxesLine)
+
+	var preSelected string
+	if id != 0 {
+		if c.contacts[id].isPending || c.contacts[id].revokedUs {  
+			id = 0  
+		} else {  
+			preSelected = c.contacts[id].name  
+		}
+	} 
+	if id == 0 {  preSelected = contactLabels[0]  }
+
+	grid1 := Grid {
+		widgetBase: widgetBase{name: "grid", margin: 5},
+		rowSpacing: 8,
+		colSpacing: 3,
+		rows: append([][]GridE{
+			{
+				{6, 1, Label{text: "Introduce a group of contacts to one another, revealing them to one another and exposing that you know every member of the group.", wrap: 200}},
+				{1,1,nil},
+				{6, 1, Label{text: "Introduce one contact to group of contacts without revealing them to one another, and exposing that you the group to one contact.", wrap: 200}},
+			},{
+				{1,1,nil},
+				{1,1,nil},
+				{1,1, Button{
+					widgetBase: widgetBase{width: 40, name: "introduceAllWay"},
+					text:       "All-Way",
+				}},
+				{1,1,nil},
+				{1,1,nil},
+				{1,1,nil},
+				{1,1,nil},
+				{1,1,nil},
+				{1,1, Button{
+					widgetBase: widgetBase{width: 40, name: "introduceOneMany"},
+					text:       "One-to-Many",
+				}},
+				{3, 1, Combo{
+					widgetBase:  widgetBase{name: "selectedOneMany"},
+					labels:      contactLabels,
+					preSelected: preSelected,
+					},
+				},
+				{1,1,nil},
+			},
+			{{1,1,nil}},
+			{
+				{9, 1, Label{text: "Select a group of contacts :", wrap: 400}},
+			},
+		},contactsBoxes...),
+	}
+	grid1.rows = append(grid1.rows, messageCompose)
+
+	getId := func (name string) uint64 {
+		for i, n := range contactLabels {
+			if n == name { return contactIds[i] }
+		}
+		return 0
+	}
+	sensitivity := func () {
+		c.gui.Actions() <- Sensitive{name: "introduceAllWay", sensitive: id != 0}
+		c.gui.Actions() <- Sensitive{name: "introduceOneMany", sensitive: id == 0}
+		c.gui.Actions() <- Sensitive{name: "selectedOneMany", sensitive: id != 0}
+		for _, i := range contactIds {
+			c.gui.Actions() <- Sensitive{name: fmt.Sprintf("%s%d", contactCheckBoxPrefix, i), sensitive: i != id}
+		}
+		c.gui.Signal()
+	}
+	sensitivity()
+
+	//nextRow := len(grid.rows)
+
+	c.gui.Actions() <- SetChild{name: "right", child: rightPane("INTRODUCE CONTACTS", grid1, nil, nil)}
+	c.gui.Actions() <- UIState{uiStateIntroduceContact}
+	c.gui.Signal()
+
+ 	for {
+		event, wanted := c.nextEvent(0)
+		if wanted {
+			return event
+		}
+
+//		if update, ok := event.(Update); ok {
+//			overSize = c.updateUsage(validContactSelected, draft)
+//			draft.body = update.text
+//			c.gui.Signal()
+//			continue
+//		}
+
+		click, ok := event.(Click)
+		if !ok {
+			continue
+		}
+		switch {
+		case click.name == "introduceAllWay":
+			id = 0
+			sensitivity()
+			continue
+		case click.name == "introduceOneMany":
+			id = getId( click.combos["selectedOneMany"] )
+			sensitivity()
+			continue
+		case click.name == "selectedOneMany":
+			id = getId( click.combos["selectedOneMany"] )
+			sensitivity()
+			continue
+		case strings.HasPrefix(click.name, contactCheckBoxPrefix):
+			i, ok := strconv.Atoi(click.name[len(contactCheckBoxPrefix):])
+			if ok != nil || i >= len(contactIds) { continue }
+			contactChecks[i] = click.checks[click.name]
+			continue
+		case click.name == "doIntroduce":
+			var cl contactList
+			if id != 0 { 
+				cl = append(cl,c.contacts[id])
+			}
+			for i=0; i<len(contactIds); i++ {
+				if contactIds[i] == id { continue }
+				if contactChecks[i] {
+					cl = append(cl,c.contacts[contactIds[i]])
+				}
+			}
+
+			var urls []string
+			if id != 0 {
+				urls = c.introducePandaMessages_onemany(cl)
+			} else {
+				urls = c.introducePandaMessages_group(cl)
+			}
+			for i := range cl {
+				draft := c.newDraft(cl[i],nil)
+				draft.body = messageBody + introducePandaMessageDesc + urls[i]
+				c.sendDraft(draft)
+				c.log.Printf("Sending introduction message to %s\n", cl[i].name)
+			}
+			c.save()
+
+
+			c.gui.Actions() <- SetChild{name: "right", child: rightPlaceholderUI}
+			c.gui.Actions() <- UIState{uiStateMain}
+			c.gui.Signal()
+			c.save()
+			return nil
+		}
+
+	}
 }
 
 func (c *guiClient) newContactUI(contact *Contact) interface{} {
@@ -2947,9 +3221,39 @@ func (c *guiClient) updateUsage(validContactSelected bool, draft *Draft) bool {
 	return over
 }
 
-func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{} {
-	if draft != nil && inReplyTo != nil {
-		panic("draft and inReplyTo both set")
+func (c *guiClient) newDraftUI(inReplyTo *InboxMessage,to uint64) (draft *Draft) {
+	if inReplyTo != nil && to != 0 {
+		panic("newDraftUI : inReplyTo and to both set")
+	}
+
+	draft = &Draft{
+		id:      c.randId(),
+		created: c.Now(),
+	}
+
+	if inReplyTo != nil {
+		draft.inReplyTo = inReplyTo.id
+		to = inReplyTo.from
+		draft.body = indentForReply(inReplyTo.message.GetBody())
+	}
+
+	fromName := "Unknown"
+	if to != 0 {
+		if from, ok := c.contacts[to]; ok {
+			fromName = from.name
+		}
+		draft.to = to
+	}
+
+	c.draftsUI.Add(draft.id, fromName, draft.created.Format(shortTimeFormat), indicatorNone)
+	c.draftsUI.Select(draft.id)
+	c.drafts[draft.id] = draft
+	return
+}
+
+func (c *guiClient) composeUI(draft *Draft) interface{} {
+	if draft == nil {
+		draft = c.newDraftUI(nil,0)
 	}
 
 	var contactNames []string
@@ -2960,55 +3264,27 @@ func (c *guiClient) composeUI(draft *Draft, inReplyTo *InboxMessage) interface{}
 	}
 
 	var preSelected string
-	if inReplyTo != nil {
-		if from, ok := c.contacts[inReplyTo.from]; ok {
-			preSelected = from.name
-		}
+	if to, ok := c.contacts[draft.to]; ok {
+		preSelected = to.name
 	}
 
 	attachments := make(map[uint64]int)
 	detachments := make(map[uint64]int)
-
-	if draft != nil {
-		if to, ok := c.contacts[draft.to]; ok {
-			preSelected = to.name
-		}
-		for i := range draft.attachments {
-			attachments[c.randId()] = i
-		}
-		for i := range draft.detachments {
-			detachments[c.randId()] = i
-		}
+	for i := range draft.attachments {
+		attachments[c.randId()] = i
+	}
+	for i := range draft.detachments {
+		detachments[c.randId()] = i
 	}
 
-	if draft != nil && draft.inReplyTo != 0 {
+	var inReplyTo *InboxMessage
+	if draft.inReplyTo != 0 {
 		for _, msg := range c.inbox {
 			if msg.id == draft.inReplyTo {
 				inReplyTo = msg
 				break
 			}
 		}
-	}
-
-	if draft == nil {
-		from := preSelected
-		if len(preSelected) == 0 {
-			from = "Unknown"
-		}
-
-		draft = &Draft{
-			id:      c.randId(),
-			created: c.Now(),
-		}
-		if inReplyTo != nil {
-			draft.inReplyTo = inReplyTo.id
-			draft.to = inReplyTo.from
-			draft.body = indentForReply(inReplyTo.message.GetBody())
-		}
-
-		c.draftsUI.Add(draft.id, from, draft.created.Format(shortTimeFormat), indicatorNone)
-		c.draftsUI.Select(draft.id)
-		c.drafts[draft.id] = draft
 	}
 
 	initialUsageMessage, overSize := draft.usageString()
