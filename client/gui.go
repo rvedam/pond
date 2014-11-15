@@ -2309,9 +2309,8 @@ func (c *guiClient) introduceUI(id uint64) interface{} {
 			},
 		}},
 		{1,1, Button{
-			widgetBase: widgetBase{width: 40, name: ""},
+			widgetBase: widgetBase{width: 40, name: "introduce"},
 			text:       "Introduce",
-			name: 		"doIntroduce"
 		}},
 	}
 	var contactsBoxesLine []GridE
@@ -2449,7 +2448,7 @@ func (c *guiClient) introduceUI(id uint64) interface{} {
 			if ok != nil || i >= len(contactIds) { continue }
 			contactChecks[i] = click.checks[click.name]
 			continue
-		case click.name == "doIntroduce":
+		case click.name == "introduce":
 			var cl contactList
 			if id != 0 { 
 				cl = append(cl,c.contacts[id])
