@@ -1601,7 +1601,7 @@ NextEvent:
 		case strings.HasPrefix(click.name, greetPrefix):
 			i, ok := strconv.Atoi(click.name[len(greetPrefix):])
 			if ok != nil || i >= len(pcs) { panic("invalid greet command") }
-			c.beginProposedPandaKeyExchange(pcs[i])
+			c.beginProposedPandaKeyExchange(pcs[i],msg.from)
 			c.gui.Actions() <- Sensitive{name: click.name, sensitive: false}
 			c.gui.Actions() <- SetButtonText{name: click.name, text: "Pending"}
 			c.gui.Signal()
@@ -2462,9 +2462,9 @@ func (c *guiClient) introduceUI(id uint64) interface{} {
 
 			var urls []string
 			if id != 0 {
-				urls = c.introducePandaMessages_onemany(cl)
+				urls = c.introducePandaMessages_onemany(cl,true)
 			} else {
-				urls = c.introducePandaMessages_group(cl)
+				urls = c.introducePandaMessages_group(cl,true)
 			}
 			for i := range cl {
 				draft := c.newDraft(cl[i],nil)
