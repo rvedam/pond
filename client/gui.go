@@ -77,6 +77,7 @@ const (
 	uiStateTimerComplete
 	uiStateEntomb
 	uiStateEntombComplete
+	uiStateContactNameChanged
 )
 
 type guiClient struct {
@@ -531,8 +532,8 @@ func (c *guiClient) mainUI() {
 		vboxName: "contactsVbox",
 	}
 
-	for id, contact := range c.contacts {
-		c.contactsUI.Add(id, contact.name, contact.subline(), contact.indicator())
+	for _, contact := range c.client.contactsSorted() {
+		c.contactsUI.Add(contact.id, contact.name, contact.subline(), contact.indicator())
 	}
 
 	c.inboxUI = &listUI{
@@ -1860,7 +1861,7 @@ type nvEntry struct {
 	name, value string
 }
 
-func nameValuesLHS(entries []nvEntry) Widget {
+func nameValuesLHS(entries []nvEntry) Grid {
 	grid := Grid{
 		widgetBase: widgetBase{margin: 6, name: "lhs"},
 		rowSpacing: 3,
@@ -1883,7 +1884,7 @@ func nameValuesLHS(entries []nvEntry) Widget {
 			GridE{1, 1, Label{
 				widgetBase: widgetBase{font: font},
 				text:       ent.value,
-				selectable: true,
+				selectable: false,
 			}},
 		})
 	}
@@ -2105,28 +2106,55 @@ func (c *guiClient) showContact(id uint64) interface{} {
 					text: "Delete",
 				}},
 			},
+			{{1,1, Label{} }},
+			{
+				{1, 1, Button{
+					widgetBase: widgetBase{
+						name: "edit",
+					},
+					text: "Edit",
+				}},
+			},
 		},
 	}
 
 	left := nameValuesLHS(entries)
+
 	c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
 	c.gui.Actions() <- UIState{uiStateShowContact}
 	c.gui.Signal()
 
 	deleteArmed := false
+	editArmed := false
 
 	for {
 		event, wanted := c.nextEvent(0)
+		click, ok := event.(Click)
 		if wanted {
 			return event
 		}
 
-		click, ok := event.(Click)
+		if update, ok0 := event.(Update); ok0 && update.name == "contactname" {
+			candidate := update.text
+			_, alreadyExists := c.contactByName(candidate)
+			if len(candidate) > 0 && !alreadyExists {
+				c.gui.Actions() <- SetButtonText{name: "edit", text: "Save"}
+			} else {
+				c.gui.Actions() <- SetButtonText{name: "edit", text: "View"}				
+			}
+			// We could adjust sensitivity or something else perhaps too :
+			// c.gui.Actions() <- Sensitive{name: "abort", sensitive: }
+			c.gui.Actions() <- UIState{uiStateShowContact}
+			c.gui.Signal()
+			continue
+		}
+
 		if !ok {
 			continue
 		}
 
-		if click.name == "delete" {
+		switch click.name {
+		case "delete":
 			if deleteArmed {
 				c.gui.Actions() <- Sensitive{name: "delete", sensitive: false}
 				c.gui.Signal()
@@ -2141,11 +2169,63 @@ func (c *guiClient) showContact(id uint64) interface{} {
 				c.gui.Actions() <- SetButtonText{name: "delete", text: "Confirm"}
 				c.gui.Signal()
 			}
+
+		case "edit":
+			if editArmed {
+				editArmed = false
+
+				newName := click.entries["contactname"]
+				_, alreadyExists := c.contactByName(newName)
+				if len(newName) == 0 || alreadyExists {
+					c.log.Printf("Another contact already has the name %s, ignoring.\n", newName) 
+				} else {
+					contact.name = newName
+					c.save()
+				}
+
+				// update the sidebar after contact name change
+				c.contactsUI.SetLine(contact.id, contact.name)
+				for _, msg := range c.inbox {
+					if msg.from == contact.id {
+						c.inboxUI.SetLine(msg.id, contact.name)
+					}
+				}
+				for _, msg := range c.outbox {
+					if msg.to == contact.id {
+						c.outboxUI.SetLine(msg.id, contact.name)
+					}
+				}
+				for _, msg := range c.drafts {
+					if msg.to == contact.id {
+						c.draftsUI.SetLine(msg.id, contact.name)
+					}
+				}
+
+				left.rows[0][1].widget = Label{ 
+                    text:       contact.name,
+                    selectable: false,
+				}
+				c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
+				c.gui.Actions() <- SetButtonText{name: "edit", text: "Edit"}
+			} else {
+				editArmed = true
+				left.rows[0][1].widget = Entry{
+					// Can we copy the font from left.rows[0][1].widget.widgetBase.font somehow?
+					widgetBase:     widgetBase{name: "contactname"},
+					text:           contact.name,
+					updateOnChange: true,
+				}
+				c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
+				c.gui.Actions() <- SetButtonText{name: "edit", text: "View"}
+			}
+			c.gui.Actions() <- UIState{uiStateShowContact}
+			c.gui.Signal()
 		}
 	}
 
 	panic("unreachable")
 }
+
 
 func (c *guiClient) newContactUI(contact *Contact) interface{} {
 	var name string
