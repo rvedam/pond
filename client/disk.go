@@ -106,10 +106,26 @@ func (c *client) unmarshal(state *disk.State) error {
 			}
 		}
 
+		if cont.IntroducedBy != nil {
+			contact.introducedBy = *cont.IntroducedBy
+		}
+		if cont.VerifiedBy != nil && len(cont.VerifiedBy) > 0 {
+			copy(contact.verifiedBy,cont.VerifiedBy)
+		}
+		if cont.IntroducedTo != nil && len(cont.IntroducedTo) > 0 {
+			copy(contact.introducedTo,cont.IntroducedTo)
+		}
+
 		if cont.IsPending != nil && *cont.IsPending {
 			contact.isPending = true
-			continue
 		}
+
+		if len(cont.TheirIdentityPublic) != len(contact.theirIdentityPublic) && !contact.isPending {
+			return errors.New("client: contact missing identity public key")
+		}
+		copy(contact.theirIdentityPublic[:], cont.TheirIdentityPublic)
+
+		if contact.isPending == true { continue }
 
 		theirGroup, ok := new(bbssig.Group).Unmarshal(cont.TheirGroup)
 		if !ok {
@@ -128,11 +144,6 @@ func (c *client) unmarshal(state *disk.State) error {
 			return errors.New("client: contact missing public key")
 		}
 		copy(contact.theirPub[:], cont.TheirPub)
-
-		if len(cont.TheirIdentityPublic) != len(contact.theirIdentityPublic) {
-			return errors.New("client: contact missing identity public key")
-		}
-		copy(contact.theirIdentityPublic[:], cont.TheirIdentityPublic)
 
 		copy(contact.theirLastDHPublic[:], cont.TheirLastPublic)
 		copy(contact.theirCurrentDHPublic[:], cont.TheirCurrentPublic)
@@ -267,7 +278,12 @@ func (c *client) marshal() []byte {
 			PandaKeyExchange: contact.pandaKeyExchange,
 			PandaError:       proto.String(contact.pandaResult),
 			RevokedUs:        proto.Bool(contact.revokedUs),
+			IntroducedBy:     proto.Uint64(contact.introducedBy),
 		}
+		copy(contact.introducedTo,cont.IntroducedTo)
+		copy(contact.verifiedBy,cont.VerifiedBy)
+
+		cont.TheirIdentityPublic = contact.theirIdentityPublic[:]
 		if !contact.isPending {
 			cont.MyGroupKey = contact.myGroupKey.Marshal()
 			cont.TheirGroup = contact.myGroupKey.Group.Marshal()
@@ -275,7 +291,6 @@ func (c *client) marshal() []byte {
 			cont.TheirPub = contact.theirPub[:]
 			cont.Generation = proto.Uint32(contact.generation)
 
-			cont.TheirIdentityPublic = contact.theirIdentityPublic[:]
 			cont.TheirLastPublic = contact.theirLastDHPublic[:]
 			cont.TheirCurrentPublic = contact.theirCurrentDHPublic[:]
 		}
