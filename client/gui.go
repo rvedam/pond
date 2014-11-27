@@ -1343,6 +1343,9 @@ func (c *guiClient) showInbox(id uint64) interface{} {
 					greet = "Pending"
 				} else {
 					greet = "Exists"
+					if pc.name != cnt.name {
+						greet += " as " + cnt.name
+					}
 				}
 				// Should say Verified if the contact existed previously
 			}
