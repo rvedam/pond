@@ -70,6 +70,8 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"os/exec"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -213,6 +215,9 @@ type client struct {
 	// disableV2Ratchet causes the client to advertise and process V1
 	// axolotl ratchet support.
 	disableV2Ratchet bool
+
+	// receiveHookCommand is command to run upon receiving a message.
+	receiveHookCommand string
 }
 
 // UI abstracts behaviour that is specific to a given interface (GUI or CLI).
@@ -351,6 +356,24 @@ NextChar:
 	return
 }
 
+func (c *client) cliIdToContact(id cliId) (*Contact) {
+	for _, contact := range c.contacts {
+		if contact.cliId == id {
+			return contact
+		}
+	}
+	return nil
+}
+
+func hexDecodeSafe(dst []byte, src string) bool {
+	l := len(dst) // amazingly this actually works if you call using [:]
+	if hex.DecodedLen(len(src)) != l { return false }
+	s := []byte(src)
+	n, err := hex.Decode(dst,s)
+	if err != nil || n != l { return false }
+	return true
+}
+
 // InboxMessage represents a message in the client's inbox. (Acks also appear
 // as InboxMessages, but their message.Body is empty.)
 type InboxMessage struct {
@@ -469,6 +492,10 @@ type Contact struct {
 	// New ratchet support.
 	ratchet *ratchet.Ratchet
 
+	introducedBy uint64
+	verifiedBy []uint64
+	introducedTo []uint64
+
 	cliId cliId
 }
 
@@ -478,6 +505,30 @@ type Contact struct {
 type Event struct {
 	t   time.Time
 	msg string
+}
+
+// contactList is a sortable slice of Contacts.
+type contactList []*Contact
+
+func (cl contactList) Len() int {
+	return len(cl)
+}
+
+func (cl contactList) Less(i, j int) bool {
+	return cl[i].name < cl[j].name
+}
+
+func (cl contactList) Swap(i, j int) {
+	cl[i], cl[j] = cl[j], cl[i]
+}
+
+func (c *client) contactsSorted() []*Contact {
+	contacts := contactList(make([]*Contact, 0, len(c.contacts)))
+	for _, contact := range c.contacts {
+		contacts = append(contacts, contact)
+	}
+	sort.Sort(contacts)
+	return contacts
 }
 
 // previousTagLifetime contains the amount of time that we'll store a previous
@@ -515,7 +566,8 @@ type pendingDetachment struct {
 type Draft struct {
 	id          uint64
 	created     time.Time
-	to          uint64
+	toNormal    []uint64
+	toIntroduce []uint64
 	body        string
 	inReplyTo   uint64
 	attachments []*pond.Message_Attachment
@@ -575,8 +627,14 @@ func (draft *Draft) usageString() (string, bool) {
 	if err != nil {
 		panic("error while serialising candidate Message: " + err.Error())
 	}
+	l := uint64(len(serialized))
 
-	s := fmt.Sprintf("%s of %s bytes", prettyNumber(uint64(len(serialized))), prettyNumber(pond.MaxSerializedMessage))
+	// We must overestimate the size of introductions 
+	to := append(draft.toNormal,draft.toIntroduce...)
+	expectedContactNameSize := 30
+	l += uint64( (len(to) - 1) * (len("pond-introduce-panda://") + 64 + expectedContactNameSize) )
+
+	s := fmt.Sprintf("%s of %s bytes", prettyNumber(l), prettyNumber(pond.MaxSerializedMessage))
 	return s, len(serialized) > pond.MaxSerializedMessage
 }
 
@@ -624,7 +682,7 @@ func (c *client) outboxToDraft(msg *queuedMessage) *Draft {
 	draft := &Draft{
 		id:          msg.id,
 		created:     msg.created,
-		to:          msg.to,
+		toNormal:    []uint64{msg.to},
 		body:        string(msg.message.Body),
 		attachments: msg.message.Files,
 		detachments: msg.message.DetachedFiles,
@@ -728,6 +786,8 @@ func (c *client) loadUI() error {
 			return err
 		}
 	}
+
+	c.receiveHookCommand = os.Getenv("POND_HOOK_RECEIVE")
 
 	c.ui.loadingUI()
 
@@ -1049,6 +1109,24 @@ func (c *client) newKeyExchange(contact *Contact) {
 	}
 }
 
+func (c *client) contactByName(name string) (*Contact, bool) {
+	for _, contact := range c.contacts {
+		if contact.name == name {
+			return contact, true
+		}
+	}
+	return nil, false
+}
+
+func (c *client) contactByIdentity(theirIdentityPublic []byte) (*Contact, bool) {
+	for _, contact := range c.contacts {
+		if bytes.Equal(contact.theirIdentityPublic[:],theirIdentityPublic) {
+			return contact, true
+		}
+	}
+	return nil, false
+}
+
 func (c *client) deleteInboxMsg(id uint64) {
 	newInbox := make([]*InboxMessage, 0, len(c.inbox))
 	for _, inboxMsg := range c.inbox {
@@ -1125,7 +1203,7 @@ func (c *client) moveContactsMessagesToEndOfQueue(id uint64) {
 		if queuedMsg.to == id {
 			movedMessages = append(movedMessages, queuedMsg)
 		} else {
-			newQueue = append(movedMessages, queuedMsg)
+			newQueue = append(newQueue, queuedMsg)
 		}
 	}
 	newQueue = append(newQueue, movedMessages...)
@@ -1144,9 +1222,16 @@ func (c *client) deleteContact(contact *Contact) {
 	c.inbox = newInbox
 
 	for _, draft := range c.drafts {
-		if draft.to == contact.id {
-			draft.to = 0
+		removeIdSet(&draft.toNormal,contact.id)
+		removeIdSet(&draft.toIntroduce,contact.id)
+	}
+
+	for id, contact := range c.contacts {
+		if contact.introducedBy == id {
+			contact.introducedBy = 0
 		}
+		removeIdSet(&contact.verifiedBy,id)
+		removeIdSet(&contact.introducedTo,id)
 	}
 
 	c.queueMutex.Lock()
@@ -1243,6 +1328,31 @@ func (c *client) runPANDA(serialisedKeyExchange []byte, id uint64, name string, 
 		err:    err,
 		result: result,
 	}
+}
+
+// Launches a runPANDA goroutine based upon a panda.SharedSecret and a
+// preliminary contact struct. 
+func (c *client) beginPandaKeyExchange(contact *Contact,secret panda.SharedSecret) {
+	if _, ok := c.contactByName(contact.name); ok {
+		c.log.Printf("A contact by the name %s already exists, this is an internal error.",contact.name);
+		return
+	}
+
+	mp := c.newMeetingPlace()
+
+	c.contacts[contact.id] = contact
+	kx, err := panda.NewKeyExchange(c.rand, mp, &secret, contact.kxsBytes)
+	if err != nil {
+		panic(err)
+	}
+	kx.Testing = c.testing
+	contact.pandaKeyExchange = kx.Marshal()
+	contact.kxsBytes = nil
+
+	c.save()
+	c.pandaWaitGroup.Add(1)
+	contact.pandaShutdownChan = make(chan struct{})
+	go c.runPANDA(contact.pandaKeyExchange, contact.id, contact.name, contact.pandaShutdownChan)
 }
 
 // processPANDAUpdate runs on the main client goroutine and handles messages
@@ -1413,4 +1523,19 @@ func (c *client) importTombFile(stateFile *disk.StateFile, keyHex, path string) 
 	<-writerDone
 
 	return nil
+}
+
+// receiveHook runs any configured commands to notify the user that a new
+// message has been received.
+func (c *client) receiveHook() {
+	if len(c.receiveHookCommand) == 0 {
+		return
+	}
+
+	cmd := exec.Command(c.receiveHookCommand)
+	go func() {
+		if err := cmd.Run(); err != nil {
+			c.log.Errorf("Failed to run receive hook command: %s", err.Error())
+		}
+	}()
 }
