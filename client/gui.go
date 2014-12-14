@@ -77,6 +77,8 @@ const (
 	uiStateTimerComplete
 	uiStateEntomb
 	uiStateEntombComplete
+	uiStateContactNameChanged
+	uiStateDetachmentComplete
 )
 
 type guiClient struct {
@@ -531,8 +533,8 @@ func (c *guiClient) mainUI() {
 		vboxName: "contactsVbox",
 	}
 
-	for id, contact := range c.contacts {
-		c.contactsUI.Add(id, contact.name, contact.subline(), contact.indicator())
+	for _, contact := range c.client.contactsSorted() {
+		c.contactsUI.Add(contact.id, contact.name, contact.subline(), contact.indicator())
 	}
 
 	c.inboxUI = &listUI{
@@ -1194,6 +1196,7 @@ func (i InboxDetachmentUI) OnFinal(id uint64) {
 
 func (i InboxDetachmentUI) OnSuccess(id uint64, detachment *pond.Message_Detachment) {
 }
+
 func (c *guiClient) showInbox(id uint64) interface{} {
 	var msg *InboxMessage
 	for _, candidate := range c.inbox {
@@ -1860,7 +1863,7 @@ type nvEntry struct {
 	name, value string
 }
 
-func nameValuesLHS(entries []nvEntry) Widget {
+func nameValuesLHS(entries []nvEntry) Grid {
 	grid := Grid{
 		widgetBase: widgetBase{margin: 6, name: "lhs"},
 		rowSpacing: 3,
@@ -2053,7 +2056,7 @@ func (c *guiClient) showContact(id uint64) interface{} {
 	c.contactsUI.SetIndicator(id, indicatorNone)
 
 	entries := []nvEntry{
-		{"NAME", contact.name},
+		{"NAME", ""},
 		{"SERVER", contact.theirServer},
 		{"PUBLIC IDENTITY", fmt.Sprintf("%x", contact.theirIdentityPublic[:])},
 		{"PUBLIC KEY", fmt.Sprintf("%x", contact.theirPub[:])},
@@ -2109,6 +2112,27 @@ func (c *guiClient) showContact(id uint64) interface{} {
 	}
 
 	left := nameValuesLHS(entries)
+
+	// Switch the label next to "name" with an entry and a button.
+	left.rows[0][1].widget = HBox{
+		children: []Widget{
+			Entry{
+				widgetBase: widgetBase{
+					name: "contactname",
+				},
+				text:           contact.name,
+				updateOnChange: true,
+			},
+			Button{
+				widgetBase: widgetBase{
+					insensitive: true,
+					name:        "changebutton",
+				},
+				text: "Change name",
+			},
+		},
+	}
+
 	c.gui.Actions() <- SetChild{name: "right", child: rightPane("CONTACT", left, right, nil)}
 	c.gui.Actions() <- UIState{uiStateShowContact}
 	c.gui.Signal()
@@ -2121,12 +2145,21 @@ func (c *guiClient) showContact(id uint64) interface{} {
 			return event
 		}
 
+		if update, ok := event.(Update); ok && update.name == "contactname" {
+			candidate := update.text
+			_, alreadyExists := c.contactByName(candidate)
+			c.gui.Actions() <- Sensitive{name: "changebutton", sensitive: len(candidate) > 0 && !alreadyExists}
+			c.gui.Signal()
+			continue
+		}
+
 		click, ok := event.(Click)
 		if !ok {
 			continue
 		}
 
-		if click.name == "delete" {
+		switch click.name {
+		case "delete":
 			if deleteArmed {
 				c.gui.Actions() <- Sensitive{name: "delete", sensitive: false}
 				c.gui.Signal()
@@ -2141,6 +2174,40 @@ func (c *guiClient) showContact(id uint64) interface{} {
 				c.gui.Actions() <- SetButtonText{name: "delete", text: "Confirm"}
 				c.gui.Signal()
 			}
+
+		case "changebutton":
+			newName := click.entries["contactname"]
+			_, alreadyExists := c.contactByName(newName)
+			if len(newName) == 0 || alreadyExists {
+				continue
+			}
+
+			contact.name = newName
+			for _, msg := range c.inbox {
+				if msg.from == contact.id {
+					c.inboxUI.SetLine(msg.id, newName)
+				}
+			}
+			for _, msg := range c.outbox {
+				if msg.to == contact.id {
+					c.outboxUI.SetLine(msg.id, newName)
+				}
+			}
+			for _, msg := range c.drafts {
+				if msg.to == contact.id {
+					c.draftsUI.SetLine(msg.id, newName)
+				}
+			}
+			for _, msg := range c.drafts {
+				if msg.to == contact.id {
+					c.draftsUI.SetLine(msg.id, newName)
+				}
+			}
+			c.contactsUI.SetLine(contact.id, newName)
+			c.gui.Actions() <- UIState{uiStateContactNameChanged}
+			c.gui.Signal()
+
+			c.save()
 		}
 	}
 
@@ -2861,6 +2928,7 @@ func (c *guiClient) maybeProcessDetachmentMsg(event interface{}, ui DetachmentUI
 		}
 		ui.OnFinal(id)
 		ui.OnSuccess(id, complete.detachment)
+		c.gui.Actions() <- UIState{uiStateDetachmentComplete}
 		c.gui.Signal()
 		return true
 	}

@@ -70,6 +70,8 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"os/exec"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -213,6 +215,9 @@ type client struct {
 	// disableV2Ratchet causes the client to advertise and process V1
 	// axolotl ratchet support.
 	disableV2Ratchet bool
+
+	// receiveHookCommand is command to run upon receiving a message.
+	receiveHookCommand string
 }
 
 // UI abstracts behaviour that is specific to a given interface (GUI or CLI).
@@ -480,6 +485,30 @@ type Event struct {
 	msg string
 }
 
+// contactList is a sortable slice of Contacts.
+type contactList []*Contact
+
+func (cl contactList) Len() int {
+	return len(cl)
+}
+
+func (cl contactList) Less(i, j int) bool {
+	return cl[i].name < cl[j].name
+}
+
+func (cl contactList) Swap(i, j int) {
+	cl[i], cl[j] = cl[j], cl[i]
+}
+
+func (c *client) contactsSorted() []*Contact {
+	contacts := contactList(make([]*Contact, 0, len(c.contacts)))
+	for _, contact := range c.contacts {
+		contacts = append(contacts, contact)
+	}
+	sort.Sort(contacts)
+	return contacts
+}
+
 // previousTagLifetime contains the amount of time that we'll store a previous
 // tag (or previous group private key) for.
 const previousTagLifetime = 14 * 24 * time.Hour
@@ -728,6 +757,8 @@ func (c *client) loadUI() error {
 			return err
 		}
 	}
+
+	c.receiveHookCommand = os.Getenv("POND_HOOK_RECEIVE")
 
 	c.ui.loadingUI()
 
@@ -1049,6 +1080,16 @@ func (c *client) newKeyExchange(contact *Contact) {
 	}
 }
 
+func (c *client) contactByName(name string) (*Contact, bool) {
+	for _, contact := range c.contacts {
+		if contact.name == name {
+			return contact, true
+		}
+	}
+
+	return nil, false
+}
+
 func (c *client) deleteInboxMsg(id uint64) {
 	newInbox := make([]*InboxMessage, 0, len(c.inbox))
 	for _, inboxMsg := range c.inbox {
@@ -1125,7 +1166,7 @@ func (c *client) moveContactsMessagesToEndOfQueue(id uint64) {
 		if queuedMsg.to == id {
 			movedMessages = append(movedMessages, queuedMsg)
 		} else {
-			newQueue = append(movedMessages, queuedMsg)
+			newQueue = append(newQueue, queuedMsg)
 		}
 	}
 	newQueue = append(newQueue, movedMessages...)
@@ -1413,4 +1454,19 @@ func (c *client) importTombFile(stateFile *disk.StateFile, keyHex, path string) 
 	<-writerDone
 
 	return nil
+}
+
+// receiveHook runs any configured commands to notify the user that a new
+// message has been received.
+func (c *client) receiveHook() {
+	if len(c.receiveHookCommand) == 0 {
+		return
+	}
+
+	cmd := exec.Command(c.receiveHookCommand)
+	go func() {
+		if err := cmd.Run(); err != nil {
+			c.log.Errorf("Failed to run receive hook command: %s", err.Error())
+		}
+	}()
 }
