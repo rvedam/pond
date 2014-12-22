@@ -1610,16 +1610,15 @@ Handle:
 		}
 
 	case introduceContactCommand:
-		contact, ok := c.currentObj.(*Contact)
-		if !ok {
-			c.Printf("%s Select contact first\n", termWarnPrefix)
-			return
-		}
-
-		cl := c.inputContactList("Introduce " + contact.name + " to contacts : ",
-			func (cnt *Contact) bool { return ! cnt.isPending && contact.id != cnt.id }  )
+		cl := c.inputContactList("Introduce contacts to one another.",
+			func (cnt *Contact) bool { return ! cnt.isPending }  )
 		if len(cl) == 0 { return }
-		cl = append(contactList{contact},cl...)
+//		contact, ok := c.currentObj.(*Contact)
+//		if !ok {
+//			c.Printf("%s Select contact first\n", termWarnPrefix)
+//			return
+//		}
+//		cl = append(contactList{contact},cl...)
 
 		// Build from notes eventually
 		prebody0 := "To: " + cl[1].name
@@ -1648,7 +1647,6 @@ Handle:
 				termCliIdStart, draft.cliId.String(), termReset, cl[i].name)
 		}
 		c.save()
-
 	case introduceContactGroupCommand:
 		cl := c.inputContactList("Introduce contacts to one another.",
 			func (cnt *Contact) bool { return ! cnt.isPending }  )
@@ -2031,6 +2029,10 @@ func (c *cliClient) inputContactList(title string,
 			prefix = "more "
 		}
 	}
+}
+
+func (c *cliClient) inputContactsList(title string) (cl contactList) {
+  return cl
 }
 
 func (c *client) listContactsAndUnknowns(ids []uint64) (string) {

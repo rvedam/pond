@@ -48,7 +48,7 @@ var cliCommands = []cliCommand{
 	{"inbox", showInboxSummaryCommand{}, "Show the Inbox", 0},
 	{"log", logCommand{}, "Show recent log entries", 0},
 	{"new-contact", newContactCommand{}, "Start a key exchange with a new contact", 0},
-	{"introduce", introduceContactCommand{}, "Introduce a contact to multiple contacts", contextContact},
+	{"introduce", introduceContactCommand{}, "Introduce a contact to multiple contacts", 0},
 	{"introgroup", introduceContactGroupCommand{}, "Introduce a group of contacts to one another", 0},
 	{"greet", greetContactCommand{}, "Accept an introduction of a proposed new contact", contextInbox},
 	{"outbox", showOutboxSummaryCommand{}, "Show the Outbox", 0},
