@@ -76,9 +76,6 @@ import (
 	"sync"
 	"time"
 
-	"code.google.com/p/go.crypto/curve25519"
-	"code.google.com/p/go.crypto/nacl/secretbox"
-	"code.google.com/p/goprotobuf/proto"
 	"github.com/agl/ed25519"
 	"github.com/agl/ed25519/extra25519"
 	"github.com/agl/pond/bbssig"
@@ -86,6 +83,9 @@ import (
 	"github.com/agl/pond/client/ratchet"
 	"github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
+	"github.com/golang/protobuf/proto"
+	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/nacl/secretbox"
 )
 
 const (
@@ -451,7 +451,7 @@ type Contact struct {
 	supportedVersion int32
 	// revoked is true if this contact has been revoked.
 	revoked bool
-	// revokedUs is true if this contact has recoved us.
+	// revokedUs is true if this contact has revoked us.
 	revokedUs bool
 	// pandaKeyExchange contains the serialised PANDA state if a key
 	// exchange is ongoing.
@@ -1151,6 +1151,10 @@ func (c *client) removeQueuedMessage(index int) {
 	c.queue = newQueue
 }
 
+// If sending a message fails for any reason then we want to move the
+// message to the end of the queue so that we never clog the queue with
+// an unsendable message. However, we also don't want to reorder messages
+// so all messages to the same contact are moved to the end of the queue.
 func (c *client) moveContactsMessagesToEndOfQueue(id uint64) {
 	// c.queueMutex must be held before calling this function.
 

@@ -11,10 +11,10 @@ import (
 	"strconv"
 	"time"
 
-	"code.google.com/p/go.crypto/curve25519"
-	"code.google.com/p/go.crypto/nacl/secretbox"
-	"code.google.com/p/goprotobuf/proto"
 	pond "github.com/agl/pond/protos"
+	"github.com/golang/protobuf/proto"
+	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/nacl/secretbox"
 )
 
 // blockSize is the size of the blocks of data that we'll send and receive when
@@ -190,14 +190,16 @@ func (c *Conn) WriteProto(msg proto.Message) error {
 	return err
 }
 
-func (c *Conn) Close() error {
+func (c *Conn) Close() (err error) {
 	if !c.isServer {
-		if _, err := c.write(nil); err != nil {
-			return err
-		}
+		_, err = c.write(nil)
 	}
 
-	return c.conn.Close()
+	if closeErr := c.conn.Close(); err == nil {
+		err = closeErr
+	}
+
+	return
 }
 
 func (c *Conn) WaitForClose() error {

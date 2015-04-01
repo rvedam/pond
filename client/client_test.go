@@ -18,9 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"code.google.com/p/goprotobuf/proto"
 	panda "github.com/agl/pond/panda"
 	pond "github.com/agl/pond/protos"
+	"github.com/golang/protobuf/proto"
 )
 
 // clientLogToStderr controls whether the TestClients will log to stderr during
@@ -402,13 +402,15 @@ func TestAccountCreation(t *testing.T) {
 		entries: map[string]string{"pw": ""},
 	}
 
-	client.gui.WaitForSignal()
-	if id := client.gui.currentStateID; id != uiStateErasureStorage {
-		t.Fatalf("client in UI state %d when it was expected to be setting up erasure storage", id)
-	}
+	if client.hasErasure() {
+		client.gui.WaitForSignal()
+		if id := client.gui.currentStateID; id != uiStateErasureStorage {
+			t.Fatalf("client in UI state %d when it was expected to be setting up erasure storage", id)
+		}
 
-	client.gui.events <- Click{
-		name: "continue",
+		client.gui.events <- Click{
+			name: "continue",
+		}
 	}
 
 	client.gui.WaitForSignal()
@@ -458,10 +460,14 @@ func proceedToMainUI(t *testing.T, client *TestClient, server *TestServer) {
 		name:    "next",
 		entries: map[string]string{"pw": ""},
 	}
-	client.AdvanceTo(uiStateErasureStorage)
-	client.gui.events <- Click{
-		name: "continue",
+
+	if client.hasErasure() {
+		client.AdvanceTo(uiStateErasureStorage)
+		client.gui.events <- Click{
+			name: "continue",
+		}
 	}
+
 	client.AdvanceTo(uiStateCreateAccount)
 	url := server.URL()
 	client.gui.events <- Click{
@@ -2357,9 +2363,12 @@ func TestEntombing(t *testing.T) {
 		name:    "next",
 		entries: map[string]string{"pw": ""},
 	}
-	client1.AdvanceTo(uiStateErasureStorage)
-	client1.gui.events <- Click{
-		name: "continue",
+
+	if client1.hasErasure() {
+		client1.AdvanceTo(uiStateErasureStorage)
+		client1.gui.events <- Click{
+			name: "continue",
+		}
 	}
 
 	client1.AdvanceTo(uiStateCreateAccount)
